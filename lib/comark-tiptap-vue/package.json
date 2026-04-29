@@ -1,0 +1,34 @@
+{
+  "name": "@comark/tiptap-vue",
+  "version": "0.0.0",
+  "description": "Vue bindings for @comark/tiptap — `<ComarkEditor>`, `useComarkEditor`, and Vue NodeView helpers.",
+  "keywords": [
+    "comark",
+    "editor",
+    "markdown",
+    "prosemirror",
+    "tiptap",
+    "vue"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sandros94/demo-comark-tiptap.git",
+    "directory": "lib/comark-tiptap-vue"
+  },
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "@comark/tiptap": "*",
+    "@tiptap/core": "^3.22.4",
+    "@tiptap/vue-3": "^3.22.4",
+    "comark": "^0.3.1",
+    "vue": "^3.5.33"
+  }
+}

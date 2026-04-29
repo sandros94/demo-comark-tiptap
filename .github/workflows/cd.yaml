@@ -1,0 +1,38 @@
+name: test
+
+on:
+  push:
+    branches:
+      - 'main'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    name: 'Upload script'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: npm i -g --force corepack && corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with: { node-version: lts/*, cache: pnpm }
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Lint project
+        run: pnpm lint
+
+      - name: Test lib
+        run: pnpm test:lib
+
+      # - name: Test e2e
+      #   run: pnpm test:e2e
+
+      - name: Build project
+        run: pnpm build
