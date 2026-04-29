@@ -12,7 +12,7 @@
     "postinstall": "nuxt prepare && vp config",
     "test": "vp test",
     "test:e2e": "vp test --project e2e",
-    "test:lib": "vp test --project @comark/tiptap"
+    "test:lib": "vp test --project @comark/tiptap --project @comark/tiptap-vue"
   },
   "devDependencies": {
     "@comark/nuxt": "^0.3.1",

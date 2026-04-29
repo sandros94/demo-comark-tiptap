@@ -47,6 +47,13 @@ export default defineConfig({
       },
       {
         test: {
+          name: '@comark/tiptap-vue',
+          include: ['lib/comark-tiptap-vue/src/**/*.{test,spec}.ts'],
+          environment: 'happy-dom',
+        },
+      },
+      {
+        test: {
           name: 'e2e',
           include: ['test/e2e/**/*.{test,spec}.ts'],
           environment: 'node',

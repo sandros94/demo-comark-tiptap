@@ -1,4 +1,11 @@
-import { Extension, type AnyExtension, type Editor, type JSONContent } from '@tiptap/core'
+import {
+  Extension,
+  commands as tiptapCommands,
+  type AnyExtension,
+  type Content,
+  type Editor,
+  type JSONContent,
+} from '@tiptap/core'
 import { parse } from 'comark'
 import { renderMarkdown } from 'comark/render'
 import { injectComarkStyles } from './style'
@@ -12,6 +19,17 @@ import type {
   NodeSpec,
   PMMark,
 } from './types'
+
+// Tiptap's core command factories. The .d.ts re-exports each one at the
+// top level, but the bundled runtime only exposes them on the `commands`
+// namespace — destructure here so the override implementations read
+// cleanly and the failure mode is loud (typecheck) if Tiptap ever moves
+// them.
+const {
+  setContent: baseSetContent,
+  insertContent: baseInsertContent,
+  insertContentAt: baseInsertContentAt,
+} = tiptapCommands
 
 // #region pure dispatcher
 
@@ -315,6 +333,18 @@ declare module '@tiptap/core' {
   interface Storage {
     comark: ComarkSerializerStorage
   }
+  /**
+   * `inline: true` tells `insertContent` / `insertContentAt` to flatten the
+   * markdown's block structure — useful when the caller wants `**bold**`
+   * inserted at the cursor as a bold text run, not a new paragraph. See
+   * the override implementation for the exact extraction semantics.
+   */
+  interface InsertContentOptions {
+    inline?: boolean
+  }
+  interface InsertContentAtOptions {
+    inline?: boolean
+  }
 }
 
 /**
@@ -420,6 +450,34 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
     // before our extension's own `onCreate` would run, so we set up here.
     this.storage.editor = this.editor
 
+    // Construction-time string content is markdown. Tiptap's constructor
+    // calls `createDocument(options.content, ...)` directly (not via the
+    // command system) at line 143 of Editor.ts — so the `setContent`
+    // override in `addCommands` below never fires for the seed. Hijack
+    // `options.content` here, BEFORE `createDoc` runs (this hook fires
+    // at line 128 of Editor.ts), to keep markdown out of Tiptap's HTML
+    // pipeline. Comark's parser is async, so we mount the editor with
+    // empty content and re-apply the parsed AST when the parse resolves.
+    // Same async semantics as `setComarkMarkdown` — callers see content
+    // settle one microtask after construction, and the editor's `update`
+    // event fires when it does.
+    const opts = this.editor.options
+    if (typeof opts.content === 'string' && opts.content !== '') {
+      const markdown = opts.content
+      // Mount empty; the parsed tree replaces it shortly.
+      opts.content = ''
+      parse(markdown)
+        .then((tree) => {
+          if (this.editor.isDestroyed) return
+          this.editor.commands.setComarkAst(tree, { emitUpdate: true })
+        })
+        .catch((err) => {
+          if (typeof console !== 'undefined') {
+            console.warn('[comark] construction-time markdown parse failed:', err)
+          }
+        })
+    }
+
     // Inject the operational stylesheet at the same point Tiptap core
     // injects its own (during construction, before any transaction).
     // `injectComarkStyles` is a no-op when `document` is undefined, so
@@ -445,13 +503,11 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
         },
       setComarkMarkdown:
         (markdown: string, options?: SetComarkContentOptions) =>
-        ({ commands }) => {
-          // Dispatch synchronously so the Tiptap chain composes; the parse
-          // is async and the result is applied on resolution. Returns true
-          // optimistically — failure is logged via console.warn.
+        ({ editor }) => {
           parse(markdown)
             .then((tree) => {
-              commands.setComarkAst(tree, options)
+              if (editor.isDestroyed) return
+              editor.commands.setComarkAst(tree, options)
             })
             .catch((err) => {
               if (typeof console !== 'undefined') {
@@ -460,6 +516,85 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
             })
           return true
         },
+
+      // String-as-markdown overrides for Tiptap's core content commands.
+      // The premise: `@comark/tiptap` is opinionated — strings ARE markdown,
+      // never HTML. So `new Editor({ content: '# Hi' })`, `setContent('# Hi')`
+      // and `insertContent('# Hi')` all route through the Comark parser
+      // instead of Tiptap's HTML pipeline. Object inputs (PM JSON, Fragment,
+      // ProseMirrorNode, null) and the empty string fall straight through to
+      // the original commands, so callers passing pre-parsed content keep
+      // the synchronous, byte-for-byte Tiptap behavior. Empty-string
+      // fallthrough is deliberate: Tiptap's own `clearContent` uses
+      // `setContent('', ...)` and relies on it being synchronous.
+      //
+      // Trade-off: comark.parse is async-only, so a string seed schedules
+      // the actual content application a microtask later. The command
+      // returns `true` optimistically; the editor's `update` event fires
+      // when the parse resolves. Same semantics as `setComarkMarkdown`.
+      setContent: (content, options) => (props) => {
+        if (typeof content !== 'string' || content === '') {
+          return baseSetContent(content as Content, options)(props)
+        }
+        parse(content)
+          .then((tree) => {
+            if (props.editor.isDestroyed) return
+            props.editor.commands.setComarkAst(tree, {
+              emitUpdate: options?.emitUpdate ?? true,
+              errorOnInvalidContent: options?.errorOnInvalidContent,
+            })
+          })
+          .catch((err) => {
+            if (typeof console !== 'undefined') {
+              console.warn('[comark] setContent: markdown parse failed:', err)
+            }
+          })
+        return true
+      },
+
+      insertContent: (value, options) => (props) => {
+        if (typeof value !== 'string' || value === '') {
+          return baseInsertContent(value as Content, options)(props)
+        }
+        parse(value)
+          .then((tree) => {
+            if (props.editor.isDestroyed) return
+            const helpers = ensureHelpers(props.editor)
+            const doc = comarkToPmDoc(tree, helpers)
+            const payload = options?.inline
+              ? (extractInlines(doc) as Content)
+              : ((doc.content ?? []) as Content)
+            props.editor.commands.insertContent(payload, options)
+          })
+          .catch((err) => {
+            if (typeof console !== 'undefined') {
+              console.warn('[comark] insertContent: markdown parse failed:', err)
+            }
+          })
+        return true
+      },
+
+      insertContentAt: (position, value, options) => (props) => {
+        if (typeof value !== 'string' || value === '') {
+          return baseInsertContentAt(position, value as Content, options)(props)
+        }
+        parse(value)
+          .then((tree) => {
+            if (props.editor.isDestroyed) return
+            const helpers = ensureHelpers(props.editor)
+            const doc = comarkToPmDoc(tree, helpers)
+            const payload = options?.inline
+              ? (extractInlines(doc) as Content)
+              : ((doc.content ?? []) as Content)
+            props.editor.commands.insertContentAt(position, payload, options)
+          })
+          .catch((err) => {
+            if (typeof console !== 'undefined') {
+              console.warn('[comark] insertContentAt: markdown parse failed:', err)
+            }
+          })
+        return true
+      },
     }
   },
 })
@@ -475,6 +610,35 @@ function ensureHelpers(editor: Editor): ComarkHelpers {
   const helpers = collectHelpers(editor.extensionManager.extensions)
   if (storage) storage.helpers = helpers
   return helpers
+}
+
+/**
+ * Flatten a parsed PM doc to its inline children for `insertContent` /
+ * `insertContentAt` when the caller passes `inline: true`.
+ *
+ * `comarkToPmDoc` always wraps content in blocks (paragraph / heading /
+ * etc.) — that's what the schema demands at the doc root. For an inline
+ * insert we don't want that wrapping; we want the *contents* of those
+ * blocks, threaded together so they can be dropped at the cursor as a
+ * text run with marks.
+ *
+ * Multi-block markdown gets stitched together with `hardBreak` between
+ * blocks so paragraph boundaries from the source don't silently vanish
+ * — `'a\n\nb'` becomes `a` + hardBreak + `b`, not `ab`. Single-paragraph
+ * markdown (the common case for an inline insert: `'**bold**'`,
+ * `'some _emphasized_ text'`) just unwraps to its inlines with no
+ * boundary markers.
+ */
+function extractInlines(doc: JSONContent): JSONContent[] {
+  const blocks = doc.content ?? []
+  const out: JSONContent[] = []
+  for (const block of blocks) {
+    const inner = block?.content ?? []
+    if (inner.length === 0) continue
+    if (out.length > 0) out.push({ type: 'hardBreak' })
+    out.push(...inner)
+  }
+  return out
 }
 
 /**

@@ -113,8 +113,6 @@ export function useComarkEditor(options: UseComarkEditorOptions = {}): UseComark
 
   const allExtensions = [...ComarkKit, ...components.map((c) => c.extension), ...extensions]
 
-  // PM JSON / HTML strings can seed Tiptap directly. Comark trees go through `setComarkAst`
-  // post-construct (Tiptap doesn't know about the tuple shape).
   const initialContent: Content | undefined = isComarkTreeLike(initial)
     ? undefined
     : (initial as Content | undefined)

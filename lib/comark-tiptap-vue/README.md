@@ -44,3 +44,22 @@ const tree = ref<ComarkTree>({ nodes: [], frontmatter: {}, meta: {} })
 ```
 
 Either model — `:ast`, `:markdown`, or `:json` — drives the same internal editor. Bind whichever flavor your app stores.
+
+## Async markdown seeds
+
+Markdown seeds — the `:markdown` v-model, the `initial: '# …'` option on `useComarkEditor`, or any code path that ultimately calls `setContent` with a string — resolve **asynchronously**. `comark.parse` is async-only, so the editor mounts with empty content for one microtask before the parsed AST lands. This is a divergence from projects like [`aguingand/tiptap-markdown`](https://github.com/aguingand/tiptap-markdown) and Tiptap's own `@tiptap/markdown` (both ship synchronous parsers).
+
+The wrapper handles the wait internally: `<ComarkEditor>`'s `ready` / `update:*` events fire when the seed lands, and the default slot's `is-ready` flag flips to `true` at the same moment. Only call sites that read editor state synchronously _after_ mount need to wait one tick.
+
+The AST and JSON seed paths stay synchronous — only string seeds incur the async hop.
+
+## Inline inserts
+
+`@comark/tiptap` overrides `insertContent` / `insertContentAt` so a markdown string is parsed via `comark` instead of HTML — see the base package's README for the full contract. The Vue layer exposes the `Editor` instance via `useComarkEditor()` / `<ComarkEditor>`'s template ref, so the override's `inline` option is reachable directly:
+
+```ts
+const wrapper = useTemplateRef<ComarkEditorExpose>('wrapper')
+wrapper.value?.editor?.commands.insertContent('**emphasis**', { inline: true })
+```
+
+Without `inline: true`, the markdown is wrapped in its parsed block(s) and inserted at the cursor as full blocks. With it, just the inline run lands inline.
