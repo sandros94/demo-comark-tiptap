@@ -105,9 +105,12 @@ defineExpose<ComarkEditorExpose>({
     inner.value?.setMarkdown?.(input, options) ?? Promise.resolve(),
   setJson: (input: SetterInput<JSONContent>, options?: SetComarkContentOptions) =>
     inner.value?.setJson?.(input, options),
+  setHtml: (input: SetterInput<string>, options?: SetComarkContentOptions) =>
+    inner.value?.setHtml?.(input, options),
   getAst: () => inner.value?.getAst?.() ?? null,
   getMarkdown: () => inner.value?.getMarkdown?.() ?? Promise.resolve(null),
   getJson: () => inner.value?.getJson?.() ?? null,
+  getHtml: () => inner.value?.getHtml?.() ?? null,
 })
 </script>
 

@@ -44,9 +44,10 @@ export interface ComarkKitOptions {
    * Forwarded to `ComarkSerializer.configure(...)`. The kit always
    * supplies `specs` itself (built from the stock spec set + any
    * `components`), so only `injectStyles` / `injectNonce` are exposed
-   * here.
+   * here. Both fields are optional — pass just the one you want to
+   * override and the kit's default fills in the rest.
    */
-  serializer: Pick<ComarkSerializerOptions, 'injectStyles' | 'injectNonce'>
+  serializer: Partial<Pick<ComarkSerializerOptions, 'injectStyles' | 'injectNonce'>>
 
   /**
    * Disable / replace the comment extension (`<!-- … -->`). Pass
@@ -100,10 +101,17 @@ export const ComarkKit = Extension.create<ComarkKitOptions>({
   addExtensions(): Extensions {
     const exts: Extensions = []
 
-    // StarterKit: we override `codeBlock`, `link`, and `underline`
-    // regardless of consumer config — see the option doc on
-    // `starterKit` for the rationale. The user's config is layered on
-    // top so they can re-enable / further tweak any of them.
+    // StarterKit: we override `codeBlock` and `underline` regardless of
+    // consumer config — see the option doc on `starterKit` for the
+    // rationale. The user's config is layered on top so they can
+    // re-enable / further tweak any of them.
+    //
+    // ComarkCodeBlock travels with StarterKit: when `starterKit` is
+    // active we replace its built-in CodeBlock with the Comark-extended
+    // one so filename / highlights / meta round-trip. When the consumer
+    // disables `starterKit` entirely, ComarkCodeBlock is skipped too —
+    // they're opting out of the whole stock surface and assembling
+    // their own.
     if (this.options.starterKit !== false) {
       exts.push(
         StarterKit.configure({
@@ -111,18 +119,9 @@ export const ComarkKit = Extension.create<ComarkKitOptions>({
           underline: false,
           ...this.options.starterKit,
         }),
+        ComarkCodeBlock,
       )
     }
-
-    // Comark-extended CodeBlock — adds filename / highlights / meta /
-    // codeHtmlAttrs on top of the stock extension's behavior. Disable
-    // by passing `starterKit: { codeBlock: false }` AND skipping this:
-    // there's no separate option because we always need the comark
-    // attrs to round-trip. If a consumer passed `codeBlock: false` to
-    // StarterKit explicitly, we still install ComarkCodeBlock — to
-    // truly remove code blocks, set `starterKit: false` and assemble
-    // the extensions yourself.
-    exts.push(ComarkCodeBlock)
 
     if (this.options.table !== false) {
       exts.push(TableKit.configure(this.options.table))

@@ -148,9 +148,11 @@ defineExpose<ComarkEditorExpose>({
   setAst: internal?.setAst,
   setMarkdown: internal?.setMarkdown,
   setJson: internal?.setJson,
+  setHtml: internal?.setHtml,
   getAst: internal?.getAst,
   getMarkdown: internal?.getMarkdown,
   getJson: internal?.getJson,
+  getHtml: internal?.getHtml,
 })
 </script>
 

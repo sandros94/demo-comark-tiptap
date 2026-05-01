@@ -103,11 +103,28 @@ export interface UseComarkEditorReturn {
    * since PM JSON does not flow through the HTML parser.
    */
   setJson: (input: SetterInput<JSONContent>, options?: SetComarkContentOptions) => void
+  /**
+   * Escape hatch: replace content from an HTML string (or derive it
+   * from the current state). Forwards to `commands.setContent` with
+   * `contentType: 'html'`, bypassing the markdown parser entirely.
+   * Use when the source is genuinely HTML (paste handlers, server-
+   * rendered fragments, etc.).
+   */
+  setHtml: (input: SetterInput<string>, options?: SetComarkContentOptions) => void
 
   /** Read the current state in any flavor. Returns `null` until ready. */
   getAst: () => ComarkTree | null
   getMarkdown: () => Promise<string | null>
   getJson: () => JSONContent | null
+  /**
+   * Read the current state as HTML — pure pass-through to Tiptap's
+   * `editor.getHTML()`. NOTE: components that ship a framework-rendered
+   * NodeView (e.g. `defineComarkVueComponent({ nodeView })`) emit only
+   * the generic `<div data-comark-component="...">` marker here, not
+   * the framework-rendered output. For lossless export prefer
+   * `getMarkdown()` or `getAst()`.
+   */
+  getHtml: () => string | null
 }
 
 export function useComarkEditor(options: UseComarkEditorOptions = {}): UseComarkEditorReturn {
@@ -224,6 +241,20 @@ export function useComarkEditor(options: UseComarkEditorOptions = {}): UseComark
     })
   }
 
+  const setHtml = (input: SetterInput<string>, options?: SetComarkContentOptions): void => {
+    const e = editor.value
+    if (!e) return
+    const next = typeof input === 'function' ? input({ content: e.getHTML(), editor: e }) : input
+    // `contentType: 'html'` flips the serializer override into
+    // pass-through mode for this string — the markdown parser is
+    // skipped and Tiptap's stock HTML pipeline handles the seed.
+    e.commands.setContent(next, {
+      emitUpdate: options?.emitUpdate ?? true,
+      errorOnInvalidContent: options?.errorOnInvalidContent,
+      contentType: 'html',
+    })
+  }
+
   // Getters
 
   const getAst = (): ComarkTree | null => editor.value?.storage.comark.getAst() ?? null
@@ -231,10 +262,22 @@ export function useComarkEditor(options: UseComarkEditorOptions = {}): UseComark
     editor.value?.storage.comark.getMarkdown() ?? Promise.resolve(null)
   const getJson = (): JSONContent | null =>
     (editor.value?.getJSON() as JSONContent | undefined) ?? null
+  const getHtml = (): string | null => editor.value?.getHTML() ?? null
 
   const isReady = computed(() => editor.value !== undefined)
 
-  return { editor, isReady, setAst, setMarkdown, setJson, getAst, getMarkdown, getJson }
+  return {
+    editor,
+    isReady,
+    setAst,
+    setMarkdown,
+    setJson,
+    setHtml,
+    getAst,
+    getMarkdown,
+    getJson,
+    getHtml,
+  }
 }
 
 // #region internals

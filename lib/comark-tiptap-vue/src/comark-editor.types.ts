@@ -67,9 +67,11 @@ export interface ComarkEditorExpose {
     options?: SetComarkContentOptions,
   ) => Promise<void>
   setJson?: (input: SetterInput<JSONContent>, options?: SetComarkContentOptions) => void
+  setHtml?: (input: SetterInput<string>, options?: SetComarkContentOptions) => void
   getAst?: () => ComarkTree | null
   getMarkdown?: () => Promise<string | null>
   getJson?: () => JSONContent | null
+  getHtml?: () => string | null
 }
 
 export interface ComarkEditorSlots {

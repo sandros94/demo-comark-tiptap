@@ -236,10 +236,23 @@ describe('useComarkEditor — imperative setters', () => {
     )
     expect(appended).toBeDefined()
   })
+
+  it('setHtml replaces content with HTML through the stock pipeline (synchronous)', async () => {
+    const m = track(mount({ initial: '' }))
+    await flushVueLifecycle()
+
+    m.result.setHtml('<h2>Set via HTML</h2>')
+
+    // Synchronous — no `nextUpdate` needed because the HTML escape
+    // hatch bypasses comark.parse and runs `baseSetContent` directly.
+    const blocks = m.result.editor.value!.getJSON().content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(2)
+  })
 })
 
 describe('useComarkEditor — getters', () => {
-  it('getAst / getMarkdown / getJson read the current content', async () => {
+  it('getAst / getMarkdown / getJson / getHtml read the current content', async () => {
     const m = track(mount({ initial: '# Hi\n' }))
     await flushVueLifecycle()
     await nextUpdate(m.result.editor.value!)
@@ -255,6 +268,11 @@ describe('useComarkEditor — getters', () => {
     const json = m.result.getJson()
     expect(json?.type).toBe('doc')
     expect(json?.content?.[0]?.type).toBe('heading')
+
+    const html = m.result.getHtml()
+    expect(html).not.toBeNull()
+    expect(html!).toContain('<h1')
+    expect(html!).toContain('Hi')
   })
 })
 

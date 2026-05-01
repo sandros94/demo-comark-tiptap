@@ -43,6 +43,8 @@ Three input shapes are honored throughout:
 
 …and the same three are observable on the way out via the `getAst` / `getMarkdown` / `getJSON` trio.
 
+`editor.getHTML()` is also available — it's pure pass-through to Tiptap's stock method, useful for clipboard / copy-out flows. NOTE: components that ship a framework-rendered NodeView (e.g. `defineComarkVueComponent({ nodeView })`) emit only the generic `<div data-comark-component="…">` marker on this path — for lossless export prefer `getMarkdown()` or `getAst()`.
+
 ## Strings are markdown
 
 `@comark/tiptap` is opinionated: **strings are markdown — never HTML**. `ComarkSerializer` overrides `setContent`, `insertContent`, and `insertContentAt` so a string argument always flows through `comark.parse`. Pre-parsed content (PM JSON, `Fragment`, `ProseMirrorNode`) passes through untouched, so callers that already hold structured content keep Tiptap's synchronous behavior. The empty string falls through too, which preserves `clearContent()`'s sync semantics.
@@ -54,7 +56,31 @@ editor.commands.insertContent('**bold**', { inline: true }) // inline run
 editor.commands.insertContentAt(pos, '## new section') // block insert
 ```
 
-If you genuinely need to seed HTML, pre-parse it yourself (e.g. via Tiptap's `generateJSON(html, extensions)`) and pass the resulting JSON. Strings have no escape hatch — that's by design.
+If you have an HTML string and want it to flow through Tiptap's stock pipeline, pass `{ contentType: 'html' }` — the markdown parse is skipped and the call runs synchronously:
+
+```ts
+new Editor({ extensions: [ComarkKit], content: '<h1>Hi</h1>', contentType: 'html' })
+editor.commands.setContent('<p>html</p>', { contentType: 'html' })
+editor.commands.insertContent('<em>i</em>', { contentType: 'html', inline: true })
+editor.commands.insertContentAt(pos, '<h2>Section</h2>', { contentType: 'html' })
+```
+
+For JSON-stringified content (either flavor), pass `{ contentType: 'json' }`. The serializer `JSON.parse`s it and routes by shape — `{ nodes: [...] }` is a Comark AST and goes through the AST application path; everything else is treated as PM JSON. Both branches are synchronous:
+
+```ts
+editor.commands.setContent(JSON.stringify(comarkTree), { contentType: 'json' })
+editor.commands.setContent(JSON.stringify(pmDoc), { contentType: 'json' })
+```
+
+OBJECT inputs are auto-detected — passing a `ComarkTree` directly works without `contentType`:
+
+```ts
+editor.commands.setContent(comarkTree)                       // → setComarkAst path
+editor.commands.insertContent(comarkTree)                    // → insert blocks
+editor.commands.setContent({ type: 'doc', content: [...] })  // → stock PM JSON path
+```
+
+The `'markdown'` value is the explicit form of the default — pass it for self-documentation, or leave `contentType` off entirely for the same behavior. PM JSON, `Fragment`, `ProseMirrorNode`, and the empty string ignore `contentType` and always pass through synchronously.
 
 ### `inline: true`
 

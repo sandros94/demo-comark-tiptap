@@ -338,12 +338,43 @@ declare module '@tiptap/core' {
    * `**bold**` inserted at the cursor as a bold text run, not a new
    * paragraph. See the override implementation for the extraction
    * semantics.
+   *
+   * `contentType` is the escape hatch for the "strings-are-markdown"
+   * default. Effective only for `string` input:
+   *
+   *   - `'markdown'` (default) — `comark.parse`, async.
+   *   - `'html'`               — Tiptap's stock HTML pipeline, sync.
+   *   - `'json'`               — `JSON.parse` first, then route by
+   *                              shape: `{ nodes: [...] }` is treated
+   *                              as a Comark AST, anything else as PM
+   *                              JSON.
+   *
+   * Object inputs are auto-detected: anything with a `nodes` array
+   * property is routed through `setComarkAst`, everything else
+   * (Fragment, ProseMirrorNode, plain PM JSON) flows to the stock
+   * command. The `contentType` flag is ignored for object inputs.
    */
   interface InsertContentOptions {
     inline?: boolean
+    contentType?: 'markdown' | 'html' | 'json'
   }
   interface InsertContentAtOptions {
     inline?: boolean
+    contentType?: 'markdown' | 'html' | 'json'
+  }
+  interface SetContentOptions {
+    contentType?: 'markdown' | 'html' | 'json'
+  }
+  interface EditorOptions {
+    /**
+     * Same escape hatch as on `setContent` — pass `'html'` or `'json'`
+     * here when constructing the editor with a string `content` that
+     * should bypass Comark's markdown parser. Defaults to `'markdown'`
+     * so `new Editor({ content: '# Hi' })` does the comark parse.
+     * Object `content` is auto-detected (Comark AST vs PM JSON) and
+     * the flag is ignored.
+     */
+    contentType?: 'markdown' | 'html' | 'json'
   }
 }
 
@@ -459,30 +490,60 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
     this.storage.editor = this.editor
     this.storage.helpers = createSerializer(this.options.specs)
 
-    // Construction-time string content is markdown. Tiptap's constructor
-    // calls `createDocument(options.content, ...)` directly (not via the
-    // command system), so the `setContent` override below never fires
-    // for the seed. Hijack `options.content` here, BEFORE `createDoc`
-    // runs, to keep markdown out of Tiptap's HTML pipeline. Comark's
-    // parser is async, so we mount the editor with empty content and
-    // re-apply the parsed AST when the parse resolves. Same async
-    // semantics as `setComarkMarkdown` — callers see content settle one
-    // microtask after construction, and the editor's `update` event
-    // fires when it does.
+    // Construction-time content needs special handling: Tiptap's
+    // constructor calls `createDocument(options.content, ...)` directly
+    // (not via the command system), so the `setContent` override below
+    // never fires for the seed. We hijack `options.content` here, BEFORE
+    // `createDoc` runs, for cases the stock pipeline can't handle.
+    //
+    //   - `string` (default markdown) → `comark.parse` is async, so we
+    //     mount empty and re-apply when the parse resolves; the editor
+    //     `update` event fires at that point. Same async semantics as
+    //     `setComarkMarkdown`.
+    //   - `string` + `contentType: 'json'` → JSON.parse synchronously,
+    //     route by shape (Comark AST vs PM JSON). Mount synchronously.
+    //   - `object` shaped like a Comark tree → apply via `setComarkAst`
+    //     synchronously (Tiptap can't construct from a `ComarkTree`).
+    //   - everything else (HTML strings, PM JSON objects, Fragment,
+    //     ProseMirrorNode, …) — leave `options.content` alone and let
+    //     Tiptap's pipeline handle it.
     const opts = this.editor.options
     if (typeof opts.content === 'string' && opts.content !== '') {
-      const markdown = opts.content
-      opts.content = ''
-      parse(markdown)
-        .then((tree) => {
-          if (this.editor.isDestroyed) return
-          this.editor.commands.setComarkAst(tree, { emitUpdate: true })
-        })
-        .catch((err) => {
-          if (typeof console !== 'undefined') {
-            console.warn('[comark] construction-time markdown parse failed:', err)
+      if (opts.contentType === 'html') {
+        // Pass-through to Tiptap's HTML pipeline.
+      } else if (opts.contentType === 'json') {
+        const parsed = safeJsonParse(opts.content, 'construction-time content')
+        if (parsed !== undefined) {
+          opts.content = isComarkTreeLike(parsed) ? null : (parsed as typeof opts.content)
+          if (isComarkTreeLike(parsed)) {
+            const tree = parsed
+            queueMicrotask(() => {
+              if (this.editor.isDestroyed) return
+              this.editor.commands.setComarkAst(tree, { emitUpdate: false })
+            })
           }
-        })
+        }
+      } else {
+        const markdown = opts.content
+        opts.content = ''
+        parse(markdown)
+          .then((tree) => {
+            if (this.editor.isDestroyed) return
+            this.editor.commands.setComarkAst(tree, { emitUpdate: true })
+          })
+          .catch((err) => {
+            if (typeof console !== 'undefined') {
+              console.warn('[comark] construction-time markdown parse failed:', err)
+            }
+          })
+      }
+    } else if (isComarkTreeLike(opts.content)) {
+      const tree = opts.content
+      opts.content = null
+      queueMicrotask(() => {
+        if (this.editor.isDestroyed) return
+        this.editor.commands.setComarkAst(tree, { emitUpdate: false })
+      })
     }
 
     // Inject the operational stylesheet at the same point Tiptap core
@@ -524,29 +585,56 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
         },
 
       // String-as-markdown overrides for Tiptap's core content commands.
-      // The premise: `@comark/tiptap` is opinionated — strings ARE
-      // markdown, never HTML. So `new Editor({ content: '# Hi' })`,
-      // `setContent('# Hi')` and `insertContent('# Hi')` all route
-      // through the Comark parser instead of Tiptap's HTML pipeline.
-      // Object inputs (PM JSON, Fragment, ProseMirrorNode, null) and the
-      // empty string fall straight through to the original commands, so
-      // callers passing pre-parsed content keep the synchronous,
-      // byte-for-byte Tiptap behavior. Empty-string fallthrough is
-      // deliberate: Tiptap's `clearContent` uses `setContent('', ...)`
-      // and relies on it being synchronous.
+      // The premise: `@comark/tiptap` is opinionated — strings default
+      // to markdown. Object inputs are auto-detected: anything with a
+      // `nodes` array is treated as a Comark AST and routed through
+      // `setComarkAst`, otherwise it flows to the stock command (PM
+      // JSON, Fragment, ProseMirrorNode, …). Empty-string fallthrough
+      // is deliberate: `clearContent` uses `setContent('', ...)` and
+      // relies on it being synchronous.
       //
-      // Trade-off: comark.parse is async-only, so a string seed
-      // schedules the actual content application a microtask later. The
-      // command returns `true` optimistically; the editor's `update`
-      // event fires when the parse resolves. Same semantics as
-      // `setComarkMarkdown`.
+      // Escape hatches via `{ contentType }` (string inputs only):
+      //   - `'html'` — let Tiptap parse the string as HTML, sync.
+      //   - `'json'` — `JSON.parse`, then route by shape (Comark AST vs
+      //                PM JSON). Sync for PM JSON, sync for Comark AST.
+      //
+      // Trade-off on the markdown path: comark.parse is async-only, so
+      // a string seed schedules the actual content application a
+      // microtask later. The command returns `true` optimistically;
+      // the editor's `update` event fires when the parse resolves.
+      // Same semantics as `setComarkMarkdown`.
       setContent: (content, options) => (props) => {
-        if (typeof content !== 'string' || content === '') {
+        // Object input: auto-detect Comark AST, otherwise fall through.
+        // We inline the AST-application here (instead of bouncing
+        // through `editor.commands.setComarkAst`) so the work happens
+        // within the current command's transaction — calling another
+        // command from inside a `(props) =>` handler dispatches a
+        // fresh transaction and ProseMirror rejects it as "mismatched."
+        if (isComarkTreeLike(content)) {
+          this.storage.frontmatter = { ...content.frontmatter }
+          this.storage.meta = { ...content.meta }
+          const doc = comarkToPmDoc(content, this.storage.helpers)
+          return baseSetContent(doc as unknown as Content, options)(props)
+        }
+        if (typeof content !== 'string' || content === '' || options?.contentType === 'html') {
           return baseSetContent(content as Content, options)(props)
+        }
+        if (options?.contentType === 'json') {
+          const parsed = safeJsonParse(content, 'setContent')
+          if (parsed === undefined) return false
+          if (isComarkTreeLike(parsed)) {
+            this.storage.frontmatter = { ...parsed.frontmatter }
+            this.storage.meta = { ...parsed.meta }
+            const doc = comarkToPmDoc(parsed, this.storage.helpers)
+            return baseSetContent(doc as unknown as Content, options)(props)
+          }
+          return baseSetContent(parsed as Content, options)(props)
         }
         parse(content)
           .then((tree) => {
             if (props.editor.isDestroyed) return
+            // Async branch — outer transaction has settled, safe to
+            // dispatch a fresh command.
             props.editor.commands.setComarkAst(tree, {
               emitUpdate: options?.emitUpdate ?? true,
               errorOnInvalidContent: options?.errorOnInvalidContent,
@@ -561,16 +649,26 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
       },
 
       insertContent: (value, options) => (props) => {
-        if (typeof value !== 'string' || value === '') {
+        if (isComarkTreeLike(value)) {
+          const payload = comarkTreeToInsertPayload(value, this.storage.helpers, options?.inline)
+          return baseInsertContent(payload, options)(props)
+        }
+        if (typeof value !== 'string' || value === '' || options?.contentType === 'html') {
           return baseInsertContent(value as Content, options)(props)
+        }
+        if (options?.contentType === 'json') {
+          const parsed = safeJsonParse(value, 'insertContent')
+          if (parsed === undefined) return false
+          if (isComarkTreeLike(parsed)) {
+            const payload = comarkTreeToInsertPayload(parsed, this.storage.helpers, options?.inline)
+            return baseInsertContent(payload, options)(props)
+          }
+          return baseInsertContent(parsed as Content, options)(props)
         }
         parse(value)
           .then((tree) => {
             if (props.editor.isDestroyed) return
-            const doc = comarkToPmDoc(tree, this.storage.helpers)
-            const payload = options?.inline
-              ? (extractInlines(doc) as Content)
-              : ((doc.content ?? []) as Content)
+            const payload = comarkTreeToInsertPayload(tree, this.storage.helpers, options?.inline)
             props.editor.commands.insertContent(payload, options)
           })
           .catch((err) => {
@@ -582,16 +680,26 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
       },
 
       insertContentAt: (position, value, options) => (props) => {
-        if (typeof value !== 'string' || value === '') {
+        if (isComarkTreeLike(value)) {
+          const payload = comarkTreeToInsertPayload(value, this.storage.helpers, options?.inline)
+          return baseInsertContentAt(position, payload, options)(props)
+        }
+        if (typeof value !== 'string' || value === '' || options?.contentType === 'html') {
           return baseInsertContentAt(position, value as Content, options)(props)
+        }
+        if (options?.contentType === 'json') {
+          const parsed = safeJsonParse(value, 'insertContentAt')
+          if (parsed === undefined) return false
+          if (isComarkTreeLike(parsed)) {
+            const payload = comarkTreeToInsertPayload(parsed, this.storage.helpers, options?.inline)
+            return baseInsertContentAt(position, payload, options)(props)
+          }
+          return baseInsertContentAt(position, parsed as Content, options)(props)
         }
         parse(value)
           .then((tree) => {
             if (props.editor.isDestroyed) return
-            const doc = comarkToPmDoc(tree, this.storage.helpers)
-            const payload = options?.inline
-              ? (extractInlines(doc) as Content)
-              : ((doc.content ?? []) as Content)
+            const payload = comarkTreeToInsertPayload(tree, this.storage.helpers, options?.inline)
             props.editor.commands.insertContentAt(position, payload, options)
           })
           .catch((err) => {
@@ -604,6 +712,45 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
     }
   },
 })
+
+// #region routing helpers (Comark AST detection + dispatch)
+
+/** Object with a `nodes` array — the structural signature of a `ComarkTree`. */
+function isComarkTreeLike(v: unknown): v is ComarkTree {
+  return (
+    !!v &&
+    typeof v === 'object' &&
+    'nodes' in (v as Record<string, unknown>) &&
+    Array.isArray((v as { nodes: unknown }).nodes)
+  )
+}
+
+function safeJsonParse(input: string, label: string): unknown {
+  try {
+    return JSON.parse(input)
+  } catch (err) {
+    if (typeof console !== 'undefined') {
+      console.warn(`[comark] ${label}: contentType="json" but content is not valid JSON:`, err)
+    }
+    return undefined
+  }
+}
+
+/**
+ * Turn a `ComarkTree` into the payload `insertContent` /
+ * `insertContentAt` actually want — the doc's block content array, or
+ * its inline-flattened form when `inline: true`. The doc-level wrap is
+ * stripped because PM's `insert*` commands take a slice of nodes, not
+ * a `doc` node.
+ */
+function comarkTreeToInsertPayload(
+  tree: ComarkTree,
+  helpers: ComarkHelpers,
+  inline?: boolean,
+): Content {
+  const doc = comarkToPmDoc(tree, helpers)
+  return inline ? (extractInlines(doc) as Content) : ((doc.content ?? []) as Content)
+}
 
 /**
  * Flatten a parsed PM doc to its inline children for `insertContent` /

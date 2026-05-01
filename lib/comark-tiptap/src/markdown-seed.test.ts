@@ -307,3 +307,266 @@ describe('ComarkSerializer overrides — `inline: true` insert option', () => {
     expect(boldRun?.text).toBe('mid')
   })
 })
+
+describe('ComarkSerializer overrides — `contentType: "html"` escape hatch', () => {
+  // The library default is markdown for strings; the HTML escape hatch
+  // is for callers that genuinely have HTML (paste handlers, server-
+  // rendered fragments, etc.) and want to opt back into Tiptap's stock
+  // pipeline. The HTML path is fully synchronous — no comark.parse
+  // microtask hop — so reads land immediately after the call.
+
+  it('parses a string seed as HTML when `contentType: "html"` is set on the constructor', () => {
+    const editor = track(
+      makeEditor({
+        content: '<h1>Hello</h1><p>body <strong>strong</strong>.</p>',
+        contentType: 'html',
+      }),
+    )
+
+    // Synchronous — no `nextUpdate` / microtask flush needed.
+    const blocks = getDoc(editor).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(1)
+    expect(blocks[1]?.type).toBe('paragraph')
+    const inlines = blocks[1]?.content ?? []
+    const boldRun = inlines.find((c) => c.marks?.some((m) => m.type === 'bold'))
+    expect(boldRun?.text).toBe('strong')
+  })
+
+  it('treats the same string as markdown (default) when `contentType` is omitted', async () => {
+    // Regression guard: opting into the escape hatch is the ONLY thing
+    // that changes behaviour. We pick a string with markdown-only
+    // syntax (`# Heading`) — under the HTML path it would land as a
+    // plain paragraph with literal `# Heading` text; under the
+    // markdown path it lands as a real heading node.
+    const editor = track(makeEditor({ content: '# Markdown heading\n' }))
+    await nextUpdate(editor) // markdown parse is async
+
+    const blocks = getDoc(editor).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(1)
+    const headingText = (blocks[0]?.content ?? [])[0]?.text
+    expect(headingText).toBe('Markdown heading')
+  })
+
+  it('routes `setContent(html, { contentType: "html" })` through the stock pipeline synchronously', () => {
+    const editor = track(makeEditor())
+
+    editor.commands.setContent('<h2>Section</h2><ul><li>a</li><li>b</li></ul>', {
+      contentType: 'html',
+    })
+
+    // Synchronous — no `nextUpdate` needed.
+    const blocks = editor.getJSON().content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(2)
+    expect(blocks[1]?.type).toBe('bulletList')
+    expect(blocks[1]?.content ?? []).toHaveLength(2)
+  })
+
+  it('routes `insertContent(html, { contentType: "html" })` through the stock pipeline', () => {
+    const editor = track(makeEditor())
+
+    editor.commands.setContent('<p>seed</p>', { contentType: 'html' })
+    editor.commands.insertContent('<h3>Inserted</h3>', { contentType: 'html' })
+
+    const types = (editor.getJSON().content ?? []).map((b) => b.type)
+    expect(types).toContain('heading')
+  })
+
+  it('routes `insertContentAt(pos, html, { contentType: "html" })` through the stock pipeline', () => {
+    const editor = track(makeEditor())
+    editor.commands.setContent('<p>first</p>', { contentType: 'html' })
+
+    const docSize = editor.state.doc.content.size
+    editor.commands.insertContentAt(docSize, '<h3>Appended</h3>', { contentType: 'html' })
+
+    const blocks = editor.getJSON().content ?? []
+    const heading = blocks.find((b) => b.type === 'heading')
+    expect(heading).toBeDefined()
+    expect(heading?.attrs?.level).toBe(3)
+  })
+
+  it('explicit `contentType: "markdown"` is the same as the default', async () => {
+    // `'markdown'` exists for documentation / readability — there is
+    // no behavioural difference vs. omitting `contentType`.
+    const editor = track(makeEditor())
+
+    editor.commands.setContent('## Section', { contentType: 'markdown' })
+    await nextUpdate(editor)
+
+    expect(editor.getJSON().content?.[0]?.type).toBe('heading')
+  })
+})
+
+describe('ComarkSerializer overrides — `contentType: "json"` (PM JSON or Comark AST)', () => {
+  // String inputs with `contentType: 'json'` are JSON.parse'd, then
+  // routed by shape: anything with a `nodes` array is a Comark AST and
+  // goes through `setComarkAst`; anything else is treated as PM JSON
+  // and falls into the stock `setContent` path. Both routes are
+  // synchronous (no comark.parse hop).
+
+  it('routes a JSON-stringified PM doc through the stock pipeline (synchronous)', () => {
+    const editor = track(makeEditor())
+    const pm = {
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'PM JSON' }] },
+      ],
+    }
+
+    editor.commands.setContent(JSON.stringify(pm), { contentType: 'json' })
+
+    const blocks = getDoc(editor).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(2)
+    expect(blocks[0]?.content?.[0]?.text).toBe('PM JSON')
+  })
+
+  it('routes a JSON-stringified Comark AST through `setComarkAst` (synchronous)', () => {
+    const editor = track(makeEditor())
+    const tree = {
+      nodes: [['h1', {}, 'AST string seed']],
+      frontmatter: { title: 'T' },
+      meta: {},
+    }
+
+    editor.commands.setContent(JSON.stringify(tree), { contentType: 'json' })
+
+    const blocks = getDoc(editor).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(1)
+    expect(blocks[0]?.content?.[0]?.text).toBe('AST string seed')
+    // Frontmatter / meta land on the serializer storage too.
+    expect(editor.storage.comark.frontmatter).toEqual({ title: 'T' })
+  })
+
+  it('returns false on a malformed JSON string (no throw, no apply)', () => {
+    const editor = track(makeEditor())
+    const result = editor.commands.setContent('{invalid', { contentType: 'json' })
+    expect(result).toBe(false)
+    // Editor stays empty (or carries TrailingNode's empty paragraph).
+    const blocks = getDoc(editor).content ?? []
+    for (const b of blocks) expect(b.type).toBe('paragraph')
+  })
+
+  it('auto-detects a Comark AST OBJECT passed to setContent (no contentType needed)', () => {
+    const editor = track(makeEditor())
+    const tree = {
+      nodes: [['h3', {}, 'auto-detected']],
+      frontmatter: {},
+      meta: {},
+    }
+
+    // No `contentType` — the serializer notices the `nodes` array
+    // shape and routes through `setComarkAst` synchronously.
+    editor.commands.setContent(tree as unknown as Parameters<typeof editor.commands.setContent>[0])
+
+    const blocks = getDoc(editor).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(3)
+  })
+
+  it('auto-detects a Comark AST OBJECT passed to insertContent', () => {
+    const editor = track(makeEditor())
+    const tree = {
+      nodes: [['h2', {}, 'inserted via AST object']],
+      frontmatter: {},
+      meta: {},
+    }
+
+    editor.commands.insertContent(
+      tree as unknown as Parameters<typeof editor.commands.insertContent>[0],
+    )
+
+    const heading = (getDoc(editor).content ?? []).find((b) => b.type === 'heading')
+    expect(heading).toBeDefined()
+    expect(heading?.attrs?.level).toBe(2)
+  })
+
+  it('auto-detects a Comark AST OBJECT passed to insertContentAt', () => {
+    const editor = track(makeEditor())
+    editor.commands.setContent('seed', { contentType: 'html' })
+    const docSize = editor.state.doc.content.size
+
+    const tree = {
+      nodes: [['h2', {}, 'appended via AST object']],
+      frontmatter: {},
+      meta: {},
+    }
+
+    editor.commands.insertContentAt(
+      docSize,
+      tree as unknown as Parameters<typeof editor.commands.insertContentAt>[1],
+    )
+
+    const heading = (getDoc(editor).content ?? []).find((b) => b.type === 'heading')
+    expect(heading).toBeDefined()
+    expect(heading?.attrs?.level).toBe(2)
+  })
+
+  it('seeds a Comark AST OBJECT via the constructor `content`', async () => {
+    const tree = {
+      nodes: [['h2', {}, 'AST object constructor seed']],
+      frontmatter: { title: 'from-tree' },
+      meta: {},
+    }
+
+    const editor = track(
+      makeEditor({
+        content: tree as unknown as JSONContent,
+      }),
+    )
+
+    // `setComarkAst` is queued via microtask in onBeforeCreate to keep
+    // the construction sequencing predictable; flush before reading.
+    await flushMicrotasks()
+
+    const blocks = getDoc(editor).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(2)
+    expect(editor.storage.comark.frontmatter).toEqual({ title: 'from-tree' })
+  })
+
+  it('seeds a JSON-stringified Comark AST via the constructor `content` + `contentType: "json"`', async () => {
+    const tree = {
+      nodes: [['h3', {}, 'json-string seed']],
+      frontmatter: {},
+      meta: {},
+    }
+
+    const editor = track(
+      makeEditor({
+        content: JSON.stringify(tree),
+        contentType: 'json',
+      }),
+    )
+
+    await flushMicrotasks()
+
+    const blocks = getDoc(editor).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(3)
+  })
+
+  it('seeds a JSON-stringified PM doc via the constructor `content` + `contentType: "json"`', () => {
+    const pm = {
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: 'PM seed' }] },
+      ],
+    }
+
+    const editor = track(
+      makeEditor({
+        content: JSON.stringify(pm),
+        contentType: 'json',
+      }),
+    )
+
+    // Synchronous — no microtask hop since this is the PM-JSON branch.
+    const blocks = getDoc(editor).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(4)
+  })
+})

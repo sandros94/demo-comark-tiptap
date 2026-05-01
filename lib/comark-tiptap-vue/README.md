@@ -60,6 +60,24 @@ The wrapper handles the wait internally: `<ComarkEditor>`'s `ready` / `update:*`
 
 The AST and JSON seed paths stay synchronous — only string seeds incur the async hop.
 
+## HTML escape hatch
+
+Strings default to markdown — that's the library's opinion — but `useComarkEditor` and `<ComarkEditor>` don't lock you out of HTML. The composable exposes a `setHtml` setter (and matching `getHtml` getter); the underlying serializer accepts `{ contentType: 'html' }` on every content command.
+
+```ts
+const wrapper = useTemplateRef<ComarkEditorExpose>('wrapper')
+wrapper.value?.setHtml?.('<h2>From a paste handler</h2>')
+
+// Or directly via the editor command surface:
+wrapper.value?.editor?.commands.setContent('<p>html</p>', { contentType: 'html' })
+wrapper.value?.editor?.commands.insertContent('<em>i</em>', { contentType: 'html', inline: true })
+
+// Read back as HTML — pure pass-through to Tiptap's editor.getHTML().
+const html = wrapper.value?.getHtml?.()
+```
+
+`getHtml()` / `editor.getHTML()` is best for clipboard / copy-out flows. Components that ship a framework-rendered NodeView (`defineComarkVueComponent({ nodeView })`) only emit a generic `<div data-comark-component="…">` marker through this path — for lossless export prefer `getMarkdown()` or `getAst()`.
+
 ## Inline inserts
 
 `@comark/tiptap` overrides `insertContent` / `insertContentAt` so a markdown string is parsed via `comark` instead of HTML — see the base package's README for the full contract. The Vue layer exposes the `Editor` instance via `useComarkEditor()` / `<ComarkEditor>`'s template ref, so the override's `inline` option is reachable directly:
