@@ -40,16 +40,15 @@ describe('table round-trip', () => {
     expect(tableSpec.toComark(pm, helpers)).toEqual(original)
   })
 
-  it('preserves alignment via cell htmlAttrs', () => {
+  it('preserves alignment as a native cell attr (stock Tiptap TableCell declares align)', () => {
     const original: ComarkElement = [
       'table',
       {},
       ['tbody', {}, ['tr', {}, ['td', { align: 'right' }, 'X'], ['td', { align: 'center' }, 'Y']]],
     ]
     const pm = tableSpec.fromComark(original, helpers)!
-    expect(pm.content?.[0]?.content?.[0]?.attrs).toEqual({
-      htmlAttrs: { align: 'right' },
-    })
+    expect(pm.content?.[0]?.content?.[0]?.attrs).toEqual({ align: 'right' })
+    expect(pm.content?.[0]?.content?.[1]?.attrs).toEqual({ align: 'center' })
     expect(tableSpec.toComark(pm, helpers)).toEqual(original)
   })
 

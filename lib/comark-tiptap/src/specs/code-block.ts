@@ -1,6 +1,4 @@
-import { Node, mergeAttributes } from '@tiptap/core'
 import { mergeAttrs, splitAttrs } from '../utils/attrs'
-import { htmlAttrSpec } from '../utils/html-attrs'
 import type { ComarkElement, ComarkHelpers, JSONContent, NodeSpec } from '../types'
 
 const SEMANTIC_KEYS = ['language', 'filename', 'highlights', 'meta'] as const
@@ -27,8 +25,8 @@ export const codeBlockSpec: NodeSpec = {
 
     const codeAttrs: Record<string, unknown> = {}
     if (node.attrs?.language) codeAttrs.class = `language-${node.attrs.language}`
-    // codeHtmlAttrs are kept separate so users can style/decorate the inner
-    // `<code>` independently of the outer `<pre>`.
+    // codeHtmlAttrs are kept separate so users can style/decorate the
+    // inner `<code>` independently of the outer `<pre>`.
     const codeHtmlAttrs = node.attrs?.codeHtmlAttrs as Record<string, unknown> | undefined
     if (codeHtmlAttrs) {
       for (const [k, v] of Object.entries(codeHtmlAttrs)) {
@@ -44,8 +42,8 @@ export const codeBlockSpec: NodeSpec = {
   fromComark(el: ComarkElement, _h: ComarkHelpers): JSONContent {
     const [, rawAttrs, ...children] = el
 
-    // Inner <code> may or may not be present. Real-world Comark always emits
-    // it; defensive code handles AST authored by hand without one.
+    // Inner <code> may or may not be present. Real-world Comark always
+    // emits it; defensive code handles AST authored by hand without one.
     const inner = children.find((c): c is ComarkElement => Array.isArray(c) && c[0] === 'code')
     let text = ''
     let codeAttrs: ComarkElement[1] | undefined
@@ -86,85 +84,3 @@ export const codeBlockSpec: NodeSpec = {
     return out
   },
 }
-
-export const ComarkCodeBlock = Node.create({
-  name: 'codeBlock',
-  group: 'block',
-  content: 'text*',
-  marks: '',
-  code: true,
-  defining: true,
-
-  addAttributes() {
-    return {
-      language: {
-        default: null,
-        parseHTML: (el) => {
-          const code = el.querySelector('code')
-          const cls = code?.getAttribute('class') ?? ''
-          const m = /language-(\S+)/.exec(cls)
-          return m ? m[1] : null
-        },
-        renderHTML: () => ({}),
-      },
-      filename: { default: null, renderHTML: () => ({}) },
-      highlights: { default: null, renderHTML: () => ({}) },
-      meta: { default: null, renderHTML: () => ({}) },
-      codeHtmlAttrs: { default: null, renderHTML: () => ({}) },
-      ...htmlAttrSpec({ reserved: SEMANTIC_KEYS }),
-    }
-  },
-
-  parseHTML() {
-    return [
-      {
-        tag: 'pre',
-        // Capture extra attrs on the inner `<code>` (e.g. `data-line-numbers`)
-        // so they survive a DOM round-trip. We deliberately drop the
-        // `language-{lang}` class because it duplicates `node.attrs.language`
-        // and is recomputed on render. We also skip kit-internal `data-comark-*`
-        // markers and PM's own `data-pm-*` bookkeeping.
-        getAttrs(el) {
-          if (!(el instanceof HTMLElement)) return false
-          const code = el.querySelector('code')
-          if (!code) return null
-          const inferredLang = (() => {
-            const cls = code.getAttribute('class') ?? ''
-            const m = /language-(\S+)/.exec(cls)
-            return m ? m[1] : null
-          })()
-          const out: Record<string, string> = {}
-          for (const attr of Array.from(code.attributes)) {
-            if (attr.name === 'class' && inferredLang && attr.value === `language-${inferredLang}`)
-              continue
-            if (attr.name.startsWith('data-pm-')) continue
-            if (attr.name.startsWith('data-comark-')) continue
-            out[attr.name] = attr.value
-          }
-          return Object.keys(out).length > 0 ? { codeHtmlAttrs: out } : null
-        },
-      },
-    ]
-  },
-
-  renderHTML({ node, HTMLAttributes }) {
-    const lang = node.attrs.language as string | null | undefined
-    const extra = (node.attrs.codeHtmlAttrs as Record<string, unknown> | null | undefined) ?? null
-    const codeAttrs: Record<string, unknown> = {}
-    if (extra) {
-      for (const [k, v] of Object.entries(extra)) {
-        if (v === null || v === undefined) continue
-        if (typeof v === 'string') codeAttrs[k] = v
-        else if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') {
-          codeAttrs[k] = String(v)
-        }
-      }
-    }
-    if (lang) codeAttrs.class = `language-${lang}`
-    return ['pre', mergeAttributes(HTMLAttributes), ['code', codeAttrs, 0]]
-  },
-
-  addStorage() {
-    return { comark: codeBlockSpec }
-  },
-})

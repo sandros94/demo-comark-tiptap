@@ -2,6 +2,7 @@ import type { AnyExtension, Content, EditorOptions } from '@tiptap/core'
 import { Editor } from '@tiptap/vue-3'
 import {
   ComarkKit,
+  type ComarkKitOptions,
   type ComarkTree,
   type JSONContent,
   type SetComarkContentOptions,
@@ -19,9 +20,9 @@ import type { ComarkVueComponentExports } from './define-component'
 export interface UseComarkEditorOptions {
   /**
    * Initial document. Read once at mount; not reactive. Accepts a Comark
-   * AST (`{ nodes, frontmatter, meta }`), PM JSON, or an HTML/text string.
-   * To replace content reactively after mount, call `setAst` /
-   * `setMarkdown` / `setJson`.
+   * AST (`{ nodes, frontmatter, meta }`), PM JSON, or a markdown string
+   * (parsed via Comark, async). To replace content reactively after
+   * mount, call `setAst` / `setMarkdown` / `setJson`.
    */
   initial?: ComarkTree | JSONContent | string
 
@@ -32,10 +33,21 @@ export interface UseComarkEditorOptions {
   extensions?: ReadonlyArray<AnyExtension>
 
   /**
-   * Forwarded to Tiptap's `Editor` constructor. Use it for `editorProps`,
-   * `editable`, `injectCSS`, custom `parseOptions`, etc. Schema-related
-   * options (extensions, content) and lifecycle hooks (onCreate /
-   * onUpdate / onDestroy) are managed by this composable.
+   * Forwarded to `ComarkKit.configure(...)`. Use this to tweak
+   * StarterKit (`{ starterKit: { heading: false } }`), tables
+   * (`{ table: false }`), images, the serializer's `injectStyles`
+   * setting, etc.
+   *
+   * `components` from this object is merged with the top-level
+   * `components` option for convenience.
+   */
+  kitOptions?: Partial<ComarkKitOptions>
+
+  /**
+   * Forwarded to Tiptap's `Editor` constructor. Use it for
+   * `editorProps`, `editable`, `injectCSS`, custom `parseOptions`, etc.
+   * Schema-related options (extensions, content) and lifecycle hooks
+   * (onCreate / onUpdate / onDestroy) are managed by this composable.
    */
   editorOptions?: Omit<
     Partial<EditorOptions>,
@@ -80,8 +92,8 @@ export interface UseComarkEditorReturn {
    */
   setAst: (input: SetterInput<ComarkTree>, options?: SetComarkContentOptions) => void
   /**
-   * Replace content from markdown (or derive it from the current state).
-   * `options` is forwarded to `commands.setComarkMarkdown`.
+   * Replace content from markdown (or derive it from the current
+   * state). `options` is forwarded to `commands.setComarkMarkdown`.
    */
   setMarkdown: (input: AsyncSetterInput<string>, options?: SetComarkContentOptions) => Promise<void>
   /**
@@ -103,6 +115,7 @@ export function useComarkEditor(options: UseComarkEditorOptions = {}): UseComark
     initial,
     components = [],
     extensions = [],
+    kitOptions,
     editorOptions,
     onCreate,
     onUpdate,
@@ -111,8 +124,22 @@ export function useComarkEditor(options: UseComarkEditorOptions = {}): UseComark
 
   const editor = shallowRef<Editor | undefined>(undefined)
 
-  const allExtensions = [...ComarkKit, ...components.map((c) => c.extension), ...extensions]
+  const mergedComponents = [
+    ...components,
+    ...((kitOptions?.components as ReadonlyArray<ComarkVueComponentExports> | undefined) ?? []),
+  ]
+  const allExtensions: AnyExtension[] = [
+    ComarkKit.configure({
+      ...kitOptions,
+      components: mergedComponents,
+    }),
+    ...extensions,
+  ]
 
+  // Comark trees and PM JSON go through dedicated commands after the
+  // editor is mounted; only HTML / markdown strings flow into Tiptap's
+  // own constructor `content` slot. The serializer's onBeforeCreate
+  // hook intercepts string content there and reroutes through Comark.
   const initialContent: Content | undefined = isComarkTreeLike(initial)
     ? undefined
     : (initial as Content | undefined)
@@ -136,11 +163,11 @@ export function useComarkEditor(options: UseComarkEditorOptions = {}): UseComark
 
     // Apply the initial Comark tree synchronously, BEFORE assigning
     // `editor.value`. Two reasons:
-    //   1. Tiptap dispatches its own `create` event asynchronously (via
-    //      `setTimeout(0)` inside the constructor). Applying initial
-    //      content from `onCreate` would land *after* the consuming
-    //      component's `onMounted` runs, racing any prop-driven setter
-    //      the consumer kicks off there.
+    //   1. Tiptap dispatches its own `create` event asynchronously
+    //      (via `setTimeout(0)` inside the constructor). Applying
+    //      initial content from `onCreate` would land *after* the
+    //      consuming component's `onMounted` runs, racing any
+    //      prop-driven setter the consumer kicks off there.
     //   2. We pass `emitUpdate: false` because the consumer already
     //      holds this value — it IS the seed they passed in. Echoing
     //      it back as an `update` event could propagate as a fake

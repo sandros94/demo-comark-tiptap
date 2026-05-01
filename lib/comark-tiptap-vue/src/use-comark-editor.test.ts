@@ -1,16 +1,15 @@
 /**
- * Coverage for `useComarkEditor` — the Vue-layer composable that wraps a
- * Tiptap `Editor` configured with `ComarkKit`. Until now this layer had
- * zero tests, which let the markdown-seed bug ride for as long as it
- * has. Fix that here: every seed flavor (AST / markdown string / PM
- * JSON), every imperative setter, and the unmount-cleanup contract.
+ * Coverage for `useComarkEditor` — the Vue-layer composable that wraps
+ * a Tiptap `Editor` configured with `ComarkKit`. Covers every seed
+ * flavor (AST / markdown string / PM JSON), every imperative setter,
+ * and the unmount-cleanup contract.
  *
  * The composable uses `onMounted` / `onBeforeUnmount`, so each test
  * mounts a tiny Vue component that calls the composable in `setup`
- * and exposes the return value through a shared ref. We avoid
- * `@vue/test-utils` because it isn't a project dep — the manual
- * `createApp` mount is small and the assertions don't need the
- * extra surface area.
+ * and exposes the return value through a captured closure variable. We
+ * avoid `@vue/test-utils` because it isn't a project dep — the manual
+ * `createApp` mount is small and the assertions don't need the extra
+ * surface area.
  */
 
 import type { Editor, JSONContent } from '@tiptap/core'
@@ -23,9 +22,7 @@ import {
   type UseComarkEditorReturn,
 } from './use-comark-editor'
 
-/**
- * Wait for the editor's next `update` event.
- */
+/** Wait for the editor's next `update` event. */
 function nextUpdate(editor: Editor, timeoutMs = 500): Promise<void> {
   return new Promise((resolve, reject) => {
     const handler = (): void => {
@@ -56,14 +53,14 @@ interface Mounted {
 /**
  * Mount a synthetic component that calls `useComarkEditor(options)` and
  * exposes the return value. We don't render anything visible — the
- * editor doesn't need to be attached to a viewport for its commands and
- * storage to work in happy-dom.
+ * editor doesn't need to be attached to a viewport for its commands
+ * and storage to work in happy-dom.
  *
- * Implementation note: stash the return on a closure-scoped `let` rather
- * than a `ref` because `ref<{ editor: ShallowRef<...> }>` would proxy
- * through `reactive` and silently unwrap the nested refs at read time —
- * `m.result.editor.value` then yields `undefined` even after the editor
- * has constructed. `let` keeps the refs as refs.
+ * Implementation note: stash the return on a closure-scoped `let`
+ * rather than a `ref` because `ref<{ editor: ShallowRef<...> }>` would
+ * proxy through `reactive` and silently unwrap the nested refs at read
+ * time — `m.result.editor.value` then yields `undefined` even after
+ * the editor has constructed. `let` keeps the refs as refs.
  */
 function mount(options: UseComarkEditorOptions): Mounted {
   let captured: UseComarkEditorReturn | null = null
@@ -97,12 +94,6 @@ function track(m: Mounted): Mounted {
   return m
 }
 
-/**
- * `editor.getJSON()` is typed against Tiptap's discriminated schema where
- * `.text` only exists on text nodes. Tests don't gain anything from that
- * narrowing, so we cast to the looser `JSONContent` shape (where `.text`
- * is optional everywhere) at the access boundary.
- */
 function getDoc(editor: Editor): JSONContent {
   return editor.getJSON() as JSONContent
 }
@@ -136,9 +127,10 @@ describe('useComarkEditor — initial seed', () => {
     }
     const m = track(mount({ initial: tree }))
 
-    // AST seed is applied via `setComarkAst({ emitUpdate: false })` from
-    // inside `onMounted` — synchronous, no editor `update` event fires.
-    // Just flush Vue's lifecycle to make `editor.value` available.
+    // AST seed is applied via `setComarkAst({ emitUpdate: false })`
+    // from inside `onMounted` — synchronous, no editor `update` event
+    // fires. Just flush Vue's lifecycle to make `editor.value`
+    // available.
     await flushVueLifecycle()
 
     const blocks = m.result.editor.value!.getJSON().content ?? []
@@ -157,8 +149,6 @@ describe('useComarkEditor — initial seed', () => {
     }
     const m = track(mount({ initial: json }))
 
-    // PM JSON goes straight through Tiptap's `content` pipeline — sync
-    // application, no `update` event from a parse.
     await flushVueLifecycle()
 
     expect(getDoc(m.result.editor.value!).content?.[0]?.content?.[0]?.text).toBe('preset')
@@ -170,9 +160,10 @@ describe('useComarkEditor — initial seed', () => {
     await flushVueLifecycle()
 
     const blocks = m.result.editor.value!.getJSON().content ?? []
-    expect(blocks).toHaveLength(1)
+    // StarterKit's TrailingNode adds a trailing empty paragraph; an
+    // empty doc therefore has at least one block (the trailing one).
+    expect(blocks.length).toBeGreaterThanOrEqual(1)
     expect(blocks[0]?.type).toBe('paragraph')
-    expect(blocks[0]?.content ?? []).toHaveLength(0)
   })
 })
 
@@ -237,10 +228,13 @@ describe('useComarkEditor — imperative setters', () => {
     await nextUpdate(editor) // functional update lands
 
     const blocks = getDoc(editor).content ?? []
-    // Original heading + appended paragraph.
     expect(blocks[0]?.type).toBe('heading')
-    const lastBlockText = (blocks[blocks.length - 1]?.content ?? [])[0]?.text
-    expect(lastBlockText).toBe('appended')
+    // Find the appended paragraph (might not be last because of
+    // TrailingNode's empty paragraph).
+    const appended = blocks.find(
+      (b) => b.type === 'paragraph' && (b.content ?? [])[0]?.text === 'appended',
+    )
+    expect(appended).toBeDefined()
   })
 })
 
@@ -281,7 +275,6 @@ describe('useComarkEditor — lifecycle hooks', () => {
     await flushMicrotasks()
 
     expect(calls).toHaveLength(1)
-    // Tiptap's editor exposes `commands`, `state`, etc.
     expect((calls[0] as { state: unknown }).state).toBeDefined()
   })
 

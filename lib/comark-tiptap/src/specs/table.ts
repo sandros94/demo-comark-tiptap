@@ -1,6 +1,4 @@
-import { Node, mergeAttributes } from '@tiptap/core'
 import { hasNoHtmlAttrs, mergeAttrs, splitAttrs } from '../utils/attrs'
-import { htmlAttrSpec } from '../utils/html-attrs'
 import type { ComarkElement, ComarkHelpers, ComarkNode, JSONContent, NodeSpec } from '../types'
 
 // #region table
@@ -37,8 +35,8 @@ export const tableSpec: NodeSpec = {
     const [, rawAttrs, ...children] = el
     const { htmlAttrs } = splitAttrs(rawAttrs, [])
 
-    // Walk thead/tbody; pull rows out flat. A stripped-down `[table, attrs, …rows]`
-    // (no thead/tbody) is also tolerated.
+    // Walk thead/tbody; pull rows out flat. A stripped-down
+    // `[table, attrs, …rows]` (no thead/tbody) is also tolerated.
     const rows: JSONContent[] = []
     for (const child of children) {
       if (!Array.isArray(child) || child[0] === null) continue
@@ -61,29 +59,6 @@ export const tableSpec: NodeSpec = {
     return out
   },
 }
-
-export const ComarkTable = Node.create({
-  name: 'table',
-  group: 'block',
-  content: 'tableRow+',
-  isolating: true,
-
-  addAttributes() {
-    return { ...htmlAttrSpec() }
-  },
-
-  parseHTML() {
-    return [{ tag: 'table' }]
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return ['table', mergeAttributes(HTMLAttributes), ['tbody', 0]]
-  },
-
-  addStorage() {
-    return { comark: tableSpec }
-  },
-})
 
 // #region tableRow
 
@@ -111,32 +86,9 @@ export const tableRowSpec: NodeSpec = {
   },
 }
 
-export const ComarkTableRow = Node.create({
-  name: 'tableRow',
-  content: '(tableCell | tableHeader)+',
-  tableRole: 'row',
+// #region tableHeader / tableCell — share the same body
 
-  addAttributes() {
-    return { ...htmlAttrSpec() }
-  },
-
-  parseHTML() {
-    return [{ tag: 'tr' }]
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return ['tr', mergeAttributes(HTMLAttributes), 0]
-  },
-
-  addStorage() {
-    return { comark: tableRowSpec }
-  },
-})
-
-// #region tableHeader / tableCell
-// (share the same body)
-
-const CELL_SEMANTIC = ['colspan', 'rowspan', 'colwidth'] as const
+const CELL_SEMANTIC = ['colspan', 'rowspan', 'colwidth', 'align'] as const
 
 function makeCellSpec(pmName: 'tableHeader' | 'tableCell', tag: 'th' | 'td'): NodeSpec {
   return {
@@ -147,19 +99,22 @@ function makeCellSpec(pmName: 'tableHeader' | 'tableCell', tag: 'th' | 'td'): No
       const colspan = node.attrs?.colspan
       const rowspan = node.attrs?.rowspan
       const colwidth = node.attrs?.colwidth
+      const align = node.attrs?.align
       if (colspan != null && Number(colspan) !== 1) semantic.colspan = Number(colspan)
       if (rowspan != null && Number(rowspan) !== 1) semantic.rowspan = Number(rowspan)
       if (colwidth != null) semantic.colwidth = colwidth
+      if (typeof align === 'string' && align.length > 0) semantic.align = align
 
       const attrs = mergeAttrs(
         semantic,
         (node.attrs?.htmlAttrs as Record<string, unknown> | undefined) ?? {},
       )
 
-      // If the cell holds a single attrless paragraph, inline its children
-      // (canonical markdown table-cell shape). Otherwise serialize blocks.
-      // `hasNoHtmlAttrs` keeps DOM-roundtripped cells (which carry the
-      // PM-default `htmlAttrs: {}`) on the flatten branch.
+      // If the cell holds a single attrless paragraph, inline its
+      // children (canonical markdown table-cell shape). Otherwise
+      // serialize blocks. `hasNoHtmlAttrs` keeps DOM-roundtripped cells
+      // (which carry the PM-default `htmlAttrs: {}`) on the flatten
+      // branch.
       const content = node.content ?? []
       if (content.length === 1 && content[0]?.type === 'paragraph' && hasNoHtmlAttrs(content[0])) {
         return [tag, attrs, ...h.serializeInlines(content[0]?.content)]
@@ -171,8 +126,8 @@ function makeCellSpec(pmName: 'tableHeader' | 'tableCell', tag: 'th' | 'td'): No
       const [, rawAttrs, ...children] = el
       const { semantic, htmlAttrs } = splitAttrs(rawAttrs, CELL_SEMANTIC)
 
-      // colspan/rowspan default to 1 — drop them on the way in too so the
-      // PM JSON doesn't carry redundant attrs that break round-trip
+      // colspan/rowspan default to 1 — drop them on the way in too so
+      // the PM JSON doesn't carry redundant attrs that break round-trip
       // equality with the parser output.
       const attrs: Record<string, unknown> = {}
       if (semantic.colspan != null && Number(semantic.colspan) !== 1) {
@@ -182,6 +137,9 @@ function makeCellSpec(pmName: 'tableHeader' | 'tableCell', tag: 'th' | 'td'): No
         attrs.rowspan = Number(semantic.rowspan)
       }
       if (semantic.colwidth != null) attrs.colwidth = semantic.colwidth
+      if (typeof semantic.align === 'string' && semantic.align.length > 0) {
+        attrs.align = semantic.align
+      }
       if (Object.keys(htmlAttrs).length > 0) attrs.htmlAttrs = htmlAttrs
 
       // Cell children are typically inline runs from a markdown table.
@@ -220,73 +178,3 @@ function isCellBlockTag(tag: unknown): boolean {
 
 export const tableHeaderSpec = makeCellSpec('tableHeader', 'th')
 export const tableCellSpec = makeCellSpec('tableCell', 'td')
-
-export const ComarkTableHeader = Node.create({
-  name: 'tableHeader',
-  content: 'block+',
-  tableRole: 'header_cell',
-  isolating: true,
-
-  addAttributes() {
-    return {
-      colspan: { default: 1, parseHTML: (el) => Number(el.getAttribute('colspan') ?? 1) },
-      rowspan: { default: 1, parseHTML: (el) => Number(el.getAttribute('rowspan') ?? 1) },
-      colwidth: {
-        default: null,
-        parseHTML: (el) => {
-          const raw = el.getAttribute('colwidth')
-          if (!raw) return null
-          return raw.split(',').map((n) => Number(n))
-        },
-      },
-      ...htmlAttrSpec({ reserved: CELL_SEMANTIC }),
-    }
-  },
-
-  parseHTML() {
-    return [{ tag: 'th' }]
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return ['th', mergeAttributes(HTMLAttributes), 0]
-  },
-
-  addStorage() {
-    return { comark: tableHeaderSpec }
-  },
-})
-
-export const ComarkTableCell = Node.create({
-  name: 'tableCell',
-  content: 'block+',
-  tableRole: 'cell',
-  isolating: true,
-
-  addAttributes() {
-    return {
-      colspan: { default: 1, parseHTML: (el) => Number(el.getAttribute('colspan') ?? 1) },
-      rowspan: { default: 1, parseHTML: (el) => Number(el.getAttribute('rowspan') ?? 1) },
-      colwidth: {
-        default: null,
-        parseHTML: (el) => {
-          const raw = el.getAttribute('colwidth')
-          if (!raw) return null
-          return raw.split(',').map((n) => Number(n))
-        },
-      },
-      ...htmlAttrSpec({ reserved: CELL_SEMANTIC }),
-    }
-  },
-
-  parseHTML() {
-    return [{ tag: 'td' }]
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return ['td', mergeAttributes(HTMLAttributes), 0]
-  },
-
-  addStorage() {
-    return { comark: tableCellSpec }
-  },
-})

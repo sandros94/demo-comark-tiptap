@@ -1,7 +1,5 @@
-import { Node, mergeAttributes } from '@tiptap/core'
 import { mergeAttrs, splitAttrs } from '../utils/attrs'
 import { autoUnwrapBlocks } from '../utils/auto-unwrap'
-import { htmlAttrSpec } from '../utils/html-attrs'
 import type { ComarkElement, ComarkHelpers, JSONContent, NodeSpec } from '../types'
 
 export const blockquoteSpec: NodeSpec = {
@@ -29,26 +27,3 @@ export const blockquoteSpec: NodeSpec = {
     return out
   },
 }
-
-export const ComarkBlockquote = Node.create({
-  name: 'blockquote',
-  group: 'block',
-  content: 'block+',
-  defining: true,
-
-  addAttributes() {
-    return { ...htmlAttrSpec() }
-  },
-
-  parseHTML() {
-    return [{ tag: 'blockquote' }]
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return ['blockquote', mergeAttributes(HTMLAttributes), 0]
-  },
-
-  addStorage() {
-    return { comark: blockquoteSpec }
-  },
-})

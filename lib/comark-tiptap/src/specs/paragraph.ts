@@ -1,6 +1,4 @@
-import { Node, mergeAttributes } from '@tiptap/core'
 import { mergeAttrs, splitAttrs } from '../utils/attrs'
-import { htmlAttrSpec } from '../utils/html-attrs'
 import type { ComarkElement, ComarkHelpers, JSONContent, NodeSpec } from '../types'
 
 export const paragraphSpec: NodeSpec = {
@@ -26,27 +24,3 @@ export const paragraphSpec: NodeSpec = {
     return out
   },
 }
-
-export const ComarkParagraph = Node.create({
-  name: 'paragraph',
-  group: 'block',
-  content: 'inline*',
-
-  addAttributes() {
-    return {
-      ...htmlAttrSpec(),
-    }
-  },
-
-  parseHTML() {
-    return [{ tag: 'p' }]
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return ['p', mergeAttributes(HTMLAttributes), 0]
-  },
-
-  addStorage() {
-    return { comark: paragraphSpec }
-  },
-})

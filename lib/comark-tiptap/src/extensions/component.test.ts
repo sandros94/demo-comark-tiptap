@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { paragraphSpec } from '../nodes/paragraph'
 import { createSerializer } from '../serializer'
+import { paragraphSpec } from '../specs/paragraph'
 import type { ComarkElement } from '../types'
 import { defineComarkComponent } from './component'
 

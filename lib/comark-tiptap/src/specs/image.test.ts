@@ -20,7 +20,7 @@ describe('imageSpec', () => {
     expect(imageSpec.toComark(pm, helpers)).toEqual(original)
   })
 
-  it('preserves width/height/class on htmlAttrs', () => {
+  it('promotes width/height to native attrs (stock Tiptap Image declares them); class flows via htmlAttrs', () => {
     const original: ComarkElement = [
       'img',
       { src: '/x.png', alt: 'alt', width: '800', height: '600', class: 'lead' },
@@ -30,7 +30,9 @@ describe('imageSpec', () => {
       src: '/x.png',
       alt: 'alt',
       title: null,
-      htmlAttrs: { width: '800', height: '600', class: 'lead' },
+      width: '800',
+      height: '600',
+      htmlAttrs: { class: 'lead' },
     })
     expect(imageSpec.toComark(pm, helpers)).toEqual(original)
   })

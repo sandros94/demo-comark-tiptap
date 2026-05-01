@@ -22,7 +22,7 @@ export {
   type ComarkVueComponentExports,
 } from './define-component'
 
-// Re-export the vue-3 `Editor` class for consumers customization.
+// Re-export the vue-3 `Editor` class for consumer customization.
 export { Editor } from '@tiptap/vue-3'
 
 // Re-export the types most users will need from `@comark/tiptap`.
@@ -30,6 +30,7 @@ export type {
   ComarkCommentTuple,
   ComarkElement,
   ComarkElementAttributes,
+  ComarkKitOptions,
   ComarkNode,
   ComarkText,
   ComarkTree,

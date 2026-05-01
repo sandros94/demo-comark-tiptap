@@ -30,39 +30,40 @@ export interface ComarkComponentDefinition<TNodeView = unknown> {
   /** Block components (`::alert`) vs inline components (`:badge[…]`). */
   kind: 'block' | 'inline'
   /**
-   * Declared props with type info. Each becomes a flat native PM attr; the
-   * round-trip respects Comark's `:`-prefix convention for non-strings.
+   * Declared props with type info. Each becomes a flat native PM attr;
+   * the round-trip respects Comark's `:`-prefix convention for
+   * non-strings.
    */
   props?: Record<string, ComarkComponentProp>
   /**
    * Optional framework-specific NodeView (Vue SFC, React component, …).
    * The framework-agnostic factory only forwards this onto the returned
    * `definition` — it does NOT wire it into the Tiptap node itself.
-   * Framework bindings (`@comark/tiptap-vue`, `@comark/tiptap-react`, ...)
+   * Framework bindings (`@comark/tiptap-vue`, `@comark/tiptap-react`, …)
    * read it and call `extension.extend({ addNodeView: … })` themselves.
    *
    * Downstream packages can narrow the type by passing `TNodeView`; e.g.
    * `ComarkComponentDefinition<Component>` for Vue, so consumers get
-   * type-checked NodeViews without needing an `Omit & { nodeView }` dance.
+   * type-checked NodeViews without an `Omit & { nodeView }` dance.
    */
   nodeView?: TNodeView
 }
 
 export interface ComarkComponentExports<TNodeView = unknown> {
   /** PM extension (Tiptap Node) for the component. */
-  extension: TiptapNode<unknown, { comark: NodeSpec }>
-  /** Serialization spec. Plug it into `createSerializer` for tests etc. */
+  extension: TiptapNode
+  /** Serialization spec — pass to `createSerializer` for tests etc. */
   spec: NodeSpec
-  /** The original definition. */
+  /** The original definition (so framework wrappers can read it). */
   definition: ComarkComponentDefinition<TNodeView>
 }
 
 // #region prop coercion
 
 /**
- * Coerce an unknown value to a string safely (no `[object Object]` from a
- * stray map/array). Anything that isn't a primitive becomes `null` and is
- * filtered out by callers.
+ * Coerce an unknown value to a string safely (no `[object Object]` from
+ * a stray map/array). Anything that isn't a primitive becomes `null` and
+ * is filtered out by callers.
  */
 function safeToString(v: unknown): string | null {
   if (typeof v === 'string') return v
@@ -132,7 +133,6 @@ function readPropsAndHtml(
   const htmlAttrs: Record<string, unknown> = {}
 
   if (!attrs) {
-    // Fill defaults
     for (const [name, decl] of Object.entries(declared)) {
       if (decl.default !== undefined) props[name] = decl.default
     }
@@ -156,7 +156,6 @@ function readPropsAndHtml(
     }
   }
 
-  // Defaults for unset declared props
   for (const [name, decl] of Object.entries(declared)) {
     if (!seen.has(name) && decl.default !== undefined) {
       props[name] = decl.default
@@ -246,8 +245,10 @@ export function defineComarkComponent<TNodeView = unknown>(
     },
   }
 
-  // Build the matching Tiptap Node extension. Each declared prop becomes a
-  // first-class PM attr.
+  // Build the matching Tiptap Node extension. Each declared prop becomes
+  // a first-class PM attr. `htmlAttrs` is declared here (rather than
+  // delegated to the global `ComarkAttrs` extension) because the
+  // component name isn't known at the time the global config is built.
   const propAttrs: Record<string, { default: unknown }> = {}
   for (const [name, decl] of Object.entries(declared)) {
     propAttrs[name] = { default: decl.default ?? null }
@@ -279,10 +280,6 @@ export function defineComarkComponent<TNodeView = unknown>(
         mergeAttributes(HTMLAttributes, { 'data-comark-component': def.name }),
         0,
       ]
-    },
-
-    addStorage() {
-      return { comark: spec }
     },
   })
 

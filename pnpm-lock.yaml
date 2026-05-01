@@ -48,6 +48,9 @@ importers:
       '@tiptap/core':
         specifier: ^3.22.4
         version: 3.22.4(@tiptap/pm@3.22.4)
+      '@tiptap/extension-code-block':
+        specifier: ^3.22.4
+        version: 3.22.4(@tiptap/core@3.22.4(@tiptap/pm@3.22.4))(@tiptap/pm@3.22.4)
       '@tiptap/extension-collaboration':
         specifier: ^3.22.4
         version: 3.22.4(@tiptap/core@3.22.4(@tiptap/pm@3.22.4))(@tiptap/pm@3.22.4)(@tiptap/y-tiptap@3.0.2(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.6)(y-protocols@1.0.7(yjs@13.6.30))(yjs@13.6.30))(yjs@13.6.30)
@@ -60,6 +63,9 @@ importers:
       '@tiptap/extension-emoji':
         specifier: ^3.22.4
         version: 3.22.4(@tiptap/core@3.22.4(@tiptap/pm@3.22.4))(@tiptap/pm@3.22.4)(@tiptap/suggestion@3.22.4(@tiptap/core@3.22.4(@tiptap/pm@3.22.4))(@tiptap/pm@3.22.4))(emojibase@17.0.0)
+      '@tiptap/extension-image':
+        specifier: ^3.22.4
+        version: 3.22.4(@tiptap/core@3.22.4(@tiptap/pm@3.22.4))
       '@tiptap/extension-list':
         specifier: ^3.22.4
         version: 3.22.4(@tiptap/core@3.22.4(@tiptap/pm@3.22.4))(@tiptap/pm@3.22.4)
@@ -70,6 +76,9 @@ importers:
         specifier: ^3.22.4
         version: 3.22.4(@tiptap/core@3.22.4(@tiptap/pm@3.22.4))
       '@tiptap/pm':
+        specifier: ^3.22.4
+        version: 3.22.4
+      '@tiptap/starter-kit':
         specifier: ^3.22.4
         version: 3.22.4
       '@tiptap/vue-3':
@@ -144,12 +153,18 @@ importers:
       '@tiptap/core':
         specifier: ^3.22.4
         version: 3.22.4(@tiptap/pm@3.22.4)
-      '@tiptap/extension-document':
+      '@tiptap/extension-code-block':
+        specifier: ^3.22.4
+        version: 3.22.4(@tiptap/core@3.22.4(@tiptap/pm@3.22.4))(@tiptap/pm@3.22.4)
+      '@tiptap/extension-image':
         specifier: ^3.22.4
         version: 3.22.4(@tiptap/core@3.22.4(@tiptap/pm@3.22.4))
-      '@tiptap/extension-text':
+      '@tiptap/extension-table':
         specifier: ^3.22.4
-        version: 3.22.4(@tiptap/core@3.22.4(@tiptap/pm@3.22.4))
+        version: 3.22.4(@tiptap/core@3.22.4(@tiptap/pm@3.22.4))(@tiptap/pm@3.22.4)
+      '@tiptap/starter-kit':
+        specifier: ^3.22.4
+        version: 3.22.4
       comark:
         specifier: ^0.3.1
         version: 0.3.1(@types/markdown-it@14.1.2)(markdown-it@14.1.1)(shiki@4.0.2)
@@ -655,12 +670,12 @@ packages:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
 
-  '@nuxt/cli-nightly@3.35.2-20260428-070821-5526992':
-    resolution: {integrity: sha512-4ooCKZCTUFqgvppJxc3h6n8Ae+8Q9pBjetcegdeew6h7qLlXFK6nPJgD4Bf4niFJ17nzKaZk1HMbYzoKrs6FvA==}
+  '@nuxt/cli-nightly@3.35.2-20260430-052653-5526992':
+    resolution: {integrity: sha512-GrxdOR2jUToK1cgbxMV8lTjrBvTZVHmVdIPBv6pBcpgqKSRTFyZmLva4PqB+v7nL9ZcN/ThVdFMoBzpNxjoYeQ==}
     engines: {node: ^16.14.0 || >=18.0.0}
     hasBin: true
     peerDependencies:
-      '@nuxt/schema': ^4.4.2
+      '@nuxt/schema': ^4.4.4
     peerDependenciesMeta:
       '@nuxt/schema':
         optional: true
@@ -5262,7 +5277,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.1
     optional: true
 
-  '@nuxt/cli-nightly@3.35.2-20260428-070821-5526992(@nuxt/schema-nightly@5.0.0-29558834.5284bce6)(cac@6.7.14)(magicast@0.5.2)':
+  '@nuxt/cli-nightly@3.35.2-20260430-052653-5526992(@nuxt/schema-nightly@5.0.0-29558834.5284bce6)(cac@6.7.14)(magicast@0.5.2)':
     dependencies:
       '@bomb.sh/tab': 0.0.14(cac@6.7.14)(citty@0.2.2)
       '@clack/prompts': 1.2.0
@@ -8203,7 +8218,7 @@ snapshots:
   nuxt-nightly@5.0.0-29558834.5284bce6(@babel/core@7.29.0)(@babel/plugin-syntax-jsx@7.28.6(@babel/core@7.29.0))(@parcel/watcher@2.5.6)(@types/node@25.6.0)(@voidzero-dev/vite-plus-core@0.1.16(@types/node@25.6.0)(jiti@2.6.1)(typescript@6.0.3)(yaml@2.8.2))(@vue/compiler-sfc@3.5.33)(cac@6.7.14)(db0@0.3.4)(dotenv@17.3.1)(giget@3.2.0)(lru-cache@11.2.7)(magicast@0.5.2)(nuxt-nightly@5.0.0-29558834.5284bce6)(oxlint@1.60.0(oxlint-tsgolint@0.20.0))(rolldown@1.0.0-rc.17)(typescript@6.0.3)(vue-tsc@3.2.7(typescript@6.0.3))(yaml@2.8.2):
     dependencies:
       '@dxup/nuxt': 0.4.0(magicast@0.5.2)(typescript@6.0.3)
-      '@nuxt/cli': '@nuxt/cli-nightly@3.35.2-20260428-070821-5526992(@nuxt/schema-nightly@5.0.0-29558834.5284bce6)(cac@6.7.14)(magicast@0.5.2)'
+      '@nuxt/cli': '@nuxt/cli-nightly@3.35.2-20260430-052653-5526992(@nuxt/schema-nightly@5.0.0-29558834.5284bce6)(cac@6.7.14)(magicast@0.5.2)'
       '@nuxt/devtools': 3.2.3(@voidzero-dev/vite-plus-core@0.1.16(@types/node@25.6.0)(jiti@2.6.1)(typescript@6.0.3)(yaml@2.8.2))(vue@3.5.33(typescript@6.0.3))
       '@nuxt/kit': '@nuxt/kit-nightly@5.0.0-29558834.5284bce6(magicast@0.5.2)'
       '@nuxt/nitro-server': '@nuxt/nitro-server-nightly@5.0.0-29558834.5284bce6(@babel/core@7.29.0)(@voidzero-dev/vite-plus-core@0.1.16(@types/node@25.6.0)(jiti@2.6.1)(typescript@6.0.3)(yaml@2.8.2))(chokidar@5.0.0)(db0@0.3.4)(dotenv@17.3.1)(giget@3.2.0)(jiti@2.6.1)(lru-cache@11.2.7)(magicast@0.5.2)(nuxt-nightly@5.0.0-29558834.5284bce6)(ofetch@2.0.0-alpha.3)(typescript@6.0.3)'

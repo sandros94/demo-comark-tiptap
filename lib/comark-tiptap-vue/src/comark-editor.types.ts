@@ -1,64 +1,88 @@
-import type { AnyExtension } from '@tiptap/core'
 import type { Editor } from '@tiptap/vue-3'
-import type { ComarkTree, JSONContent } from '@comark/tiptap'
-import type { UnwrapRef } from 'vue'
-import type { UseComarkEditorOptions, UseComarkEditorReturn } from './use-comark-editor'
+import type { ComarkTree, JSONContent, SetComarkContentOptions } from '@comark/tiptap'
+import type { AnyExtension } from '@tiptap/core'
+import type { AsyncSetterInput, SetterInput, UseComarkEditorOptions } from './use-comark-editor'
 import type { ComarkVueComponentExports } from './define-component'
 
-type MaybeUndefined<T extends object, TKept extends keyof T> = {
-  [K in keyof T as K extends TKept ? never : K]: UnwrapRef<T[K]> | undefined
-} & {
-  [K in TKept]: UnwrapRef<T[K]>
-}
-
 export interface ComarkEditorProps {
-  /** Bring-your-own editor instance (skips internal `useComarkEditor`). */
-  editor?: Editor | undefined
   /**
-   * Initial document — read once at mount. Not reactive. To replace
-   * content later, use a `v-model:*` binding or the editor's setters
-   * exposed via the slot / template ref.
+   * Pre-built editor instance. If supplied, the wrapper does NOT spin
+   * up its own — useful when the consumer wants full control over the
+   * Tiptap `Editor` lifecycle (e.g. for collaborative setups).
+   */
+  editor?: Editor
+
+  /**
+   * Comark AST v-model. Two-way bound: outer changes propagate into
+   * the editor, editor updates emit `update:ast`.
+   */
+  ast?: ComarkTree
+
+  /**
+   * Markdown v-model. Same shape as `ast`, just on the markdown
+   * surface. Note: writes are async (Comark parses markdown
+   * asynchronously); reads land on the editor's `update` event.
+   */
+  markdown?: string
+
+  /**
+   * PM JSON v-model. Bypasses Comark's parser entirely — useful when
+   * you already hold structured content.
+   */
+  json?: JSONContent
+
+  /**
+   * Non-reactive initial seed. Used at mount only; later changes are
+   * ignored. Prefer one of the v-model props above for live binding.
    */
   initial?: ComarkTree | JSONContent | string
-  /** Two-way bind a Comark AST. */
-  ast?: ComarkTree
-  /** Two-way bind a markdown string. */
-  markdown?: string
-  /** Two-way bind a PM JSON document. */
-  json?: JSONContent
-  /** User-defined Comark components (block or inline). */
+
+  /** User-defined Comark components from `defineComarkVueComponent`. */
   components?: ReadonlyArray<ComarkVueComponentExports>
-  /** Additional Tiptap extensions (appended after the kit). */
+
+  /** Additional Tiptap extensions, appended after the kit. */
   extensions?: ReadonlyArray<AnyExtension>
-  /** Pass-through for `useComarkEditor` advanced options. */
+
+  /** Forwarded to Tiptap's `Editor` constructor. */
   editorOptions?: UseComarkEditorOptions['editorOptions']
+
+  /** Forwarded to `ComarkKit.configure(...)`. */
+  kitOptions?: UseComarkEditorOptions['kitOptions']
 }
 
 export interface ComarkEditorEmits {
-  /** v-model:ast — fired on every transaction that changes the document. */
-  'update:ast': [tree: ComarkTree]
-  /** v-model:markdown — fired on every transaction. */
-  'update:markdown': [markdown: string]
-  /** v-model:json — fired on every transaction. */
-  'update:json': [json: JSONContent]
-  /** Editor instance, fired once after construction. */
-  'ready': [editor: Editor]
-  /** Catch-all update event with the editor instance. */
-  'update': [editor: Editor]
+  (e: 'update:ast', tree: ComarkTree): void
+  (e: 'update:markdown', markdown: string): void
+  (e: 'update:json', json: JSONContent): void
+  (e: 'ready', editor: Editor): void
+  (e: 'update', editor: Editor): void
+}
+
+export interface ComarkEditorExpose {
+  editor: Editor | undefined
+  isReady: boolean
+  setAst?: (input: SetterInput<ComarkTree>, options?: SetComarkContentOptions) => void
+  setMarkdown?: (
+    input: AsyncSetterInput<string>,
+    options?: SetComarkContentOptions,
+  ) => Promise<void>
+  setJson?: (input: SetterInput<JSONContent>, options?: SetComarkContentOptions) => void
+  getAst?: () => ComarkTree | null
+  getMarkdown?: () => Promise<string | null>
+  getJson?: () => JSONContent | null
 }
 
 export interface ComarkEditorSlots {
+  /**
+   * Rendered above the Tiptap content. Receives the live editor (when
+   * ready) and an `is-ready` flag so callers can render a toolbar that
+   * reacts to mark / node activity once the editor exists.
+   */
   default(props: { editor: Editor | undefined; isReady: boolean }): unknown
+  /**
+   * Rendered while the editor is mounting (Tiptap touches the DOM in
+   * its constructor, so SSR / pre-mount renders skip the live
+   * component). Falls back to nothing if the slot isn't supplied.
+   */
   fallback(): unknown
 }
-
-/**
- * Runtime shape of `<ComarkEditor>` accessible via `templateRef.value`.
- * `editor` and `isReady` are always present (they live on the wrapper);
- * the imperative setter / getter functions are only exposed when the
- * component owns its `useComarkEditor` instance (`prop.editor` not set).
- */
-export interface ComarkEditorExpose extends MaybeUndefined<
-  UseComarkEditorReturn,
-  'editor' | 'isReady'
-> {}

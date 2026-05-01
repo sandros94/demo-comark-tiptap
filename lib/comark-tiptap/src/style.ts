@@ -64,22 +64,15 @@ span[data-comark-component]:not([data-node-view-wrapper]) {
 `
 
 /**
- * Marker on the auto-injected `<style>` tag. Same approach Tiptap core
- * uses for `data-tiptap-style` — a single tag per document, regardless
- * of how many editor instances exist.
+ * Marker on the auto-injected `<style>` tag — mirrors Tiptap core's
+ * `data-tiptap-style`. A single tag is shared per document.
  */
 export const COMARK_STYLE_MARKER = 'data-comark-style'
 
 /**
  * Idempotent insertion of the kit stylesheet into `document.head`.
- * Returns the existing tag if one is already present (so multiple
- * editors share one tag), creates and appends otherwise. No-op when
- * `document` is undefined (SSR / Node environment) — the editor never
- * mounts there anyway.
- *
- * @param nonce  CSP nonce to set on the style tag, mirroring Tiptap
- *               core's `injectNonce` option. Leave undefined for envs
- *               without a strict CSP.
+ * Returns the existing tag if one is already present, creates and appends
+ * otherwise. No-op when `document` is undefined (SSR / Node test runners).
  */
 export function injectComarkStyles(nonce?: string): HTMLStyleElement | null {
   if (typeof document === 'undefined') return null

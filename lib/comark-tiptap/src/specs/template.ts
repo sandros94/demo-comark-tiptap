@@ -1,6 +1,4 @@
-import { Node, mergeAttributes } from '@tiptap/core'
 import { mergeAttrs, splitAttrs } from '../utils/attrs'
-import { htmlAttrSpec } from '../utils/html-attrs'
 import type { ComarkElement, ComarkHelpers, JSONContent, NodeSpec } from '../types'
 
 const SEMANTIC_KEYS = ['name'] as const
@@ -33,35 +31,3 @@ export const templateSpec: NodeSpec = {
     }
   },
 }
-
-export const ComarkTemplate = Node.create({
-  name: 'comarkTemplate',
-  group: 'block',
-  content: 'block+',
-  defining: true,
-  selectable: true,
-  draggable: false,
-
-  addAttributes() {
-    return {
-      name: {
-        default: null,
-        parseHTML: (el) => el.getAttribute('data-slot'),
-        renderHTML: (attrs) => (attrs.name ? { 'data-slot': attrs.name as string } : {}),
-      },
-      ...htmlAttrSpec({ reserved: SEMANTIC_KEYS }),
-    }
-  },
-
-  parseHTML() {
-    return [{ tag: 'div[data-comark-template]' }]
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return ['div', mergeAttributes(HTMLAttributes, { 'data-comark-template': '' }), 0]
-  },
-
-  addStorage() {
-    return { comark: templateSpec }
-  },
-})

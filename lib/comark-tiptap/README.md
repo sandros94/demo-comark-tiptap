@@ -1,36 +1,51 @@
 # @comark/tiptap
 
-A complete Tiptap editor schema for [Comark](https://github.com/comark/comark) documents.
+A Comark-aware Tiptap kit. Built on top of `@tiptap/starter-kit`, `@tiptap/extension-image`, and `@tiptap/extension-table` — the schema is whatever Tiptap upstream ships, plus a thin layer that round-trips losslessly to the Comark AST and markdown.
 
-The PM JSON shape, the Comark AST, and the markdown string are three views of the same document. Round-trip is lossless because the schema covers every Comark feature directly — `class`/`id`/`style`/`data-*`/`aria-*` are native PM attrs on nodes _and_ marks; tables, slot templates, comments, and components are first-class node types; nothing rides on a generic carrier object.
+## What's in the box
 
-## Status
-
-Work in progress. The kit is being experimented inside this repository before being lifted into the upstream Comark monorepo.
+- **`ComarkKit`** — a single `Extension.create` that registers StarterKit + tables + image + comark-specific nodes (`ComarkComment`, `ComarkTemplate`) + the global `htmlAttrs` declaration + the serializer. Configure / disable any piece via options.
+- **`ComarkSerializer`** — owns the dispatch table. `editor.storage.comark.getAst()` / `getMarkdown()`, plus `setComarkAst` / `setComarkMarkdown` commands and string-as-markdown overrides for `setContent` / `insertContent` / `insertContentAt`.
+- **`ComarkAttrs`** — adds `htmlAttrs` (a free-form attribute bag) to every stock node and mark via `addGlobalAttributes`. `class` / `id` / `data-*` / `aria-*` / custom — all preserved across the round-trip without touching the per-extension schema.
+- **`defineComarkComponent`** — block / inline component factory with typed props and an optional framework-specific `nodeView` slot. Framework wrappers (e.g. `@comark/tiptap-vue`) pick this up to install the framework-rendered NodeView.
 
 ## Quick look
 
 ```ts
 import { Editor } from '@tiptap/core'
-import { ComarkKit, ComarkComponent } from '@comark/tiptap'
+import { ComarkKit, defineComarkComponent } from '@comark/tiptap'
 
-const editor = new Editor({
-  extensions: [
-    ComarkKit,
-    ComarkComponent.create({ name: 'alert', kind: 'block', schema, nodeView }),
-  ],
+const Alert = defineComarkComponent({
+  name: 'alert',
+  kind: 'block',
+  props: {
+    type: { type: 'string', default: 'info' },
+    title: { type: 'string' },
+  },
 })
 
-editor.commands.setComarkMarkdown('# Hello\n\n::alert\nHi\n::')
-editor.commands.setComarkAst(tree)
+const editor = new Editor({
+  extensions: [ComarkKit.configure({ components: [Alert] })],
+  content: '# Hello\n\n::alert\nHi\n::',
+})
 
-editor.storage.comark.getMarkdown() // -> string
-editor.storage.comark.getAst() // -> ComarkTree
+editor.storage.comark.getAst() // ComarkTree (sync)
+await editor.storage.comark.getMarkdown() // string (async — comark/render)
+editor.commands.setComarkMarkdown('# Hi') // round-trips through comark.parse
+editor.commands.setComarkAst(tree) // round-trips through the serializer's dispatch table
 ```
+
+Three input shapes are honored throughout:
+
+- `string` — markdown, parsed via `comark.parse` (async)
+- `ComarkTree` — applied via `setComarkAst`
+- `JSONContent` (PM JSON) — applied via Tiptap's stock `setContent`
+
+…and the same three are observable on the way out via the `getAst` / `getMarkdown` / `getJSON` trio.
 
 ## Strings are markdown
 
-`@comark/tiptap` is opinionated: in this kit, **strings are markdown — never HTML**. The `ComarkSerializer` extension overrides Tiptap's `setContent`, `insertContent`, and `insertContentAt` so a string argument always flows through `comark.parse`. Pre-parsed content (PM JSON, `Fragment`, `ProseMirrorNode`) passes through untouched, so callers that already hold structured content keep Tiptap's synchronous behavior. The empty string falls through too, which preserves `clearContent()`'s sync semantics.
+`@comark/tiptap` is opinionated: **strings are markdown — never HTML**. `ComarkSerializer` overrides `setContent`, `insertContent`, and `insertContentAt` so a string argument always flows through `comark.parse`. Pre-parsed content (PM JSON, `Fragment`, `ProseMirrorNode`) passes through untouched, so callers that already hold structured content keep Tiptap's synchronous behavior. The empty string falls through too, which preserves `clearContent()`'s sync semantics.
 
 ```ts
 new Editor({ extensions: [ComarkKit], content: '# Hi' }) // markdown
@@ -43,21 +58,53 @@ If you genuinely need to seed HTML, pre-parse it yourself (e.g. via Tiptap's `ge
 
 ### `inline: true`
 
-By default, an `insertContent('**bold**')` call wraps the parsed markdown in a paragraph and inserts that as a block. Pass `{ inline: true }` to flatten the block structure and drop just the inline run at the cursor:
+By default, `insertContent('**bold**')` wraps the parsed markdown in a paragraph and inserts that as a block. Pass `{ inline: true }` to flatten the block structure and drop just the inline run at the cursor:
 
 ```ts
 editor.commands.insertContent('**emphasis** added', { inline: true })
 ```
 
-Multi-paragraph markdown passed with `inline: true` is bridged with `hardBreak` so source paragraph boundaries survive the flatten — `'a\n\nb'` becomes `a` + `hardBreak` + `b`, not `ab`. Works the same on `insertContentAt(pos, md, { inline: true })`.
+Multi-paragraph markdown passed with `inline: true` is bridged with `hardBreak` so source paragraph boundaries survive the flatten — `'a\n\nb'` becomes `a` + `hardBreak` + `b`, not `ab`. Same on `insertContentAt(pos, md, { inline: true })`.
 
 ### Async seed — a divergence from upstream
 
-`comark.parse` is asynchronous, so when `setContent` / `insertContent` / `new Editor({ content })` receive a markdown string, the command returns `true` synchronously but the actual content application lands one microtask later. This differs from projects like [`aguingand/tiptap-markdown`](https://github.com/aguingand/tiptap-markdown) and Tiptap's own `@tiptap/markdown` (both ship sync parsers, so their seed completes before the constructor returns).
+`comark.parse` is asynchronous, so when `setContent` / `insertContent` / `new Editor({ content })` receive a markdown string, the command returns `true` synchronously but the actual content application lands one microtask later. This differs from projects like [`aguingand/tiptap-markdown`](https://github.com/aguingand/tiptap-markdown) and Tiptap's own `@tiptap/markdown` (both ship sync parsers).
 
-In practice that means: don't read `editor.getJSON()` immediately after a markdown string seed — listen on `editor.on('update', …)` or wait one tick first. Object content paths (PM JSON, AST via `setComarkAst`) remain synchronous.
+Don't read `editor.getJSON()` immediately after a markdown string seed — listen on `editor.on('update', …)` or wait one tick first. Object content paths (PM JSON, AST via `setComarkAst`) remain synchronous.
 
-## Why a complete kit?
+## Why register specs in a registry instead of per-extension storage?
 
-Trying to bolt Comark's expressiveness onto Tiptap's StarterKit defaults forced information into a `comarkExtras` carrier — clean for round-trip but second-class in the schema. ProseMirror has always allowed nodes _and_ marks to declare any attributes they want; Tiptap exposes that via `Mark.create({ addAttributes() })`.
-This kit takes the obvious option: declare the schema Comark actually needs.
+Earlier drafts attached a Comark `NodeSpec` / `MarkSpec` to each extension's `addStorage({ comark })`. That worked but coupled the spec to whichever extension instance happened to be in the schema, made it awkward to override stock specs, and forced custom Bold / Italic / Heading reimplementations to keep the storage contract intact.
+
+The current approach decouples the two: `ComarkSerializer.configure({ specs: { nodes, marks } })` carries the dispatch table directly. `ComarkKit` builds it from `comarkSpecs` (the stock set) plus any user-defined components. The benefits compound — we use **stock** `@tiptap/starter-kit` extensions with no schema-side modifications, free-ride on Tiptap upstream maintenance, and stay drop-in compatible with the rest of the Tiptap ecosystem (placeholder, character-count, collaboration, drag-handle, …).
+
+`htmlAttrs` is added once via `addGlobalAttributes`, not per-extension. User components opt in to the same helper (`htmlAttrSpec`) inside their own `addAttributes` because their type names aren't known at the time global attrs are resolved.
+
+## Configuration
+
+```ts
+ComarkKit.configure({
+  // Forwarded to StarterKit. We always override `codeBlock: false`
+  // (replaced with ComarkCodeBlock) and `underline: false` (Comark has
+  // no underline mark); user options layer on top.
+  starterKit: { heading: { levels: [1, 2, 3] } },
+
+  // Forwarded to TableKit. `false` to omit tables entirely.
+  table: { table: { resizable: true } },
+
+  // Forwarded to Image. Inline mode is forced on by default.
+  image: { allowBase64: true },
+
+  // Disable comark-specific extensions if your AST never carries them.
+  comment: false,
+  template: false,
+
+  // User-defined components contributed via defineComarkComponent.
+  components: [Alert],
+
+  // Style auto-injection (mirrors @tiptap/core's `injectCSS`).
+  serializer: { injectStyles: true, injectNonce: 'csp-token' },
+})
+```
+
+Most consumers will pass `{ components: [...] }` and leave the rest at defaults.

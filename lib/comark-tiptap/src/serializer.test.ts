@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { boldSpec } from './marks/bold'
-import { paragraphSpec } from './nodes/paragraph'
+import { boldSpec } from './specs/marks'
+import { paragraphSpec } from './specs/paragraph'
 import { comarkToPmDoc, createSerializer, pmDocToComark } from './serializer'
 import type { ComarkTree } from './types'
 
@@ -53,9 +53,9 @@ describe('createSerializer', () => {
   })
 
   it('wraps stray inline-only tags appearing at block level', () => {
-    // A bold span at the root of an AST is unusual but valid — Comark would
-    // emit it inside a paragraph normally. We wrap defensively so PM stays
-    // schema-valid.
+    // A bold span at the root of an AST is unusual but valid — Comark
+    // would emit it inside a paragraph normally. We wrap defensively
+    // so PM stays schema-valid.
     const tree: ComarkTree = {
       nodes: [['strong', {}, 'orphan'] as never],
       frontmatter: {},

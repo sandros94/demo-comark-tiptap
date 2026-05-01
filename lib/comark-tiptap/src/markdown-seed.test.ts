@@ -1,11 +1,11 @@
 /**
  * @vitest-environment happy-dom
  *
- * Coverage for the string-as-markdown overrides ComarkSerializer applies
- * to Tiptap's core content commands. The premise: in a Comark editor,
- * strings are markdown — never HTML. These tests exercise every entry
- * point that plausibly hits the override (constructor seed, runtime
- * `setContent`, `insertContent`, `insertContentAt`) plus the
+ * Coverage for the string-as-markdown overrides ComarkSerializer
+ * applies to Tiptap's core content commands. The premise: in a Comark
+ * editor, strings are markdown — never HTML. These tests exercise every
+ * entry point that plausibly hits the override (constructor seed,
+ * runtime `setContent`, `insertContent`, `insertContentAt`) plus the
  * pass-through paths (object content, empty string) so we catch any
  * regression in either direction.
  *
@@ -17,9 +17,7 @@ import { Editor, type JSONContent } from '@tiptap/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ComarkKit } from './kit'
 
-/**
- * Wait for the editor's next `update` event.
- */
+/** Wait for the editor's next `update` event. */
 function nextUpdate(editor: Editor, timeoutMs = 500): Promise<void> {
   return new Promise((resolve, reject) => {
     const handler = (): void => {
@@ -39,9 +37,7 @@ const flushMicrotasks = (): Promise<void> => new Promise((r) => setTimeout(r, 0)
 
 function makeEditor(options: Partial<ConstructorParameters<typeof Editor>[0]> = {}): Editor {
   return new Editor({
-    extensions: [...ComarkKit],
-    // Disable the default style injection per-test to keep happy-dom's
-    // <head> uncluttered between runs.
+    extensions: [ComarkKit],
     ...options,
   })
 }
@@ -198,10 +194,13 @@ describe('ComarkSerializer overrides — `insertContent` / `insertContentAt`', (
     editor.commands.insertContentAt(docSize, '\n\n# Appended\n')
     await nextUpdate(editor)
 
+    // StarterKit ships TrailingNode (an empty paragraph at the end of
+    // the doc), so the heading isn't necessarily the very last block
+    // — but it must be present and at level 1.
     const blocks = editor.getJSON().content ?? []
-    const last = blocks[blocks.length - 1]
-    expect(last?.type).toBe('heading')
-    expect(last?.attrs?.level).toBe(1)
+    const heading = blocks.find((b) => b.type === 'heading')
+    expect(heading).toBeDefined()
+    expect(heading?.attrs?.level).toBe(1)
   })
 
   it('passes JSON inserts through synchronously', () => {
@@ -223,8 +222,8 @@ describe('ComarkSerializer overrides — `inline: true` insert option', () => {
     const editor = track(makeEditor({ content: 'before \n' }))
     await nextUpdate(editor) // seed lands
 
-    // Place the cursor at the end of the existing paragraph so the inline
-    // payload lands inside it instead of starting a new block.
+    // Place the cursor at the end of the existing paragraph so the
+    // inline payload lands inside it instead of starting a new block.
     const docSize = editor.state.doc.content.size
     editor.commands.setTextSelection(docSize - 1)
 

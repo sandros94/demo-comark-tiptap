@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boldSpec } from '../marks/bold'
+import { boldSpec } from './marks'
 import { createSerializer } from '../serializer'
 import type { ComarkElement } from '../types'
 import { bulletListSpec, listItemSpec, orderedListSpec } from './lists'

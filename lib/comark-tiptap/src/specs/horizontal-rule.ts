@@ -1,6 +1,4 @@
-import { Node, mergeAttributes } from '@tiptap/core'
 import { mergeAttrs, splitAttrs } from '../utils/attrs'
-import { htmlAttrSpec } from '../utils/html-attrs'
 import type { ComarkElement, JSONContent, NodeSpec } from '../types'
 
 export const horizontalRuleSpec: NodeSpec = {
@@ -23,26 +21,3 @@ export const horizontalRuleSpec: NodeSpec = {
     return out
   },
 }
-
-export const ComarkHorizontalRule = Node.create({
-  name: 'horizontalRule',
-  group: 'block',
-  atom: true,
-  selectable: true,
-
-  addAttributes() {
-    return { ...htmlAttrSpec() }
-  },
-
-  parseHTML() {
-    return [{ tag: 'hr' }]
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return ['hr', mergeAttributes(HTMLAttributes)]
-  },
-
-  addStorage() {
-    return { comark: horizontalRuleSpec }
-  },
-})

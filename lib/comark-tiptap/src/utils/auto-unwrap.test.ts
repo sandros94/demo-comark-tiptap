@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { paragraphSpec } from '../nodes/paragraph'
-import { boldSpec } from '../marks/bold'
+import { boldSpec } from '../specs/marks'
+import { paragraphSpec } from '../specs/paragraph'
 import { createSerializer } from '../serializer'
 import { autoUnwrapBlocks } from './auto-unwrap'
 

@@ -20,9 +20,10 @@ defineSlots<ComarkEditorSlots>()
 
 defineOptions({ inheritAttrs: false })
 
-// JSON-shadow loop guard. Each direction stores the last serialized form
-// it saw; equal-shadow writes are skipped. Cheap (PM docs are usually small)
-// and it dodges the editor's reconstructed-AST identity problem.
+// JSON-shadow loop guard. Each direction stores the last serialized
+// form it saw; equal-shadow writes are skipped. Cheap (PM docs are
+// usually small) and it dodges the editor's reconstructed-AST identity
+// problem.
 let astShadow: string | null = null
 let mdShadow: string | null = null
 let jsonShadow: string | null = null
@@ -35,9 +36,9 @@ const safeJson = (v: unknown): string => {
   }
 }
 
-// Pick the seed: any v-model wins over `initial` (an explicit binding is
-// always the source of truth at mount time). HTML strings only seed via
-// `initial` since they aren't a v-model flavor.
+// Pick the seed: any v-model wins over `initial` (an explicit binding
+// is always the source of truth at mount time). HTML strings only seed
+// via `initial` since they aren't a v-model flavor.
 const seedAtMount: ComarkTree | JSONContent | string | undefined =
   props.ast ?? props.markdown ?? props.json ?? props.initial
 
@@ -47,10 +48,11 @@ const internal = props.editor
       initial: seedAtMount,
       components: props.components,
       extensions: props.extensions,
+      kitOptions: props.kitOptions,
       editorOptions: props.editorOptions,
       onCreate: (e) => {
-        // Initialize shadows from whatever just got into the editor so the
-        // first onUpdate doesn't echo back as a fake change.
+        // Initialize shadows from whatever just got into the editor so
+        // the first onUpdate doesn't echo back as a fake change.
         if (props.ast !== undefined) {
           astShadow = safeJson(e.storage.comark.getAst())
         }
@@ -58,9 +60,9 @@ const internal = props.editor
           jsonShadow = safeJson(e.getJSON())
         }
         if (props.markdown !== undefined) {
-          // getMarkdown is async; seed the shadow once it resolves. Any
-          // edit that lands before then will re-emit (acceptable — at
-          // worst we send one redundant update at startup).
+          // getMarkdown is async; seed the shadow once it resolves.
+          // Any edit that lands before then will re-emit (acceptable —
+          // at worst we send one redundant update at startup).
           e.storage.comark.getMarkdown().then((md) => {
             mdShadow = md
           })
