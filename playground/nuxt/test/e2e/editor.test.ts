@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   buildFixture,
@@ -10,9 +11,16 @@ import {
   stopServer,
 } from '@nuxt/test-utils/e2e'
 
+// The Nuxt app lives at `playground/nuxt/`; this file is in
+// `playground/nuxt/test/e2e/`, so the rootDir resolves two levels up.
+const NUXT_ROOT_DIR = fileURLToPath(new URL('../..', import.meta.url))
+
 describe('e2e: demo page', () => {
   beforeAll(async () => {
-    const ctx = createTestContext({ nuxtConfig: {} })
+    const ctx = createTestContext({
+      rootDir: NUXT_ROOT_DIR,
+      nuxtConfig: {},
+    })
     setTestContext(ctx)
     await loadFixture()
     await buildFixture()

@@ -315,13 +315,19 @@ declare module '@tiptap/core' {
       /**
        * Replace editor content from a Comark AST.
        *
+       * Accepts either a `ComarkTree` object or a JSON-encoded AST
+       * string (for symmetry with `setComarkMarkdown(string)`). The
+       * string form `JSON.parse`s and validates the AST shape; if the
+       * shape doesn't match, the command returns `false` without
+       * touching the editor.
+       *
        * Pass `{ emitUpdate: false }` for silent application — the new
        * content takes effect but no `update` event fires, so external
        * listeners aren't notified. Useful when the caller already holds
        * this value (e.g. for initial-content application) and an echo
        * back through `update` would clobber its source of truth.
        */
-      setComarkAst: (tree: ComarkTree, options?: SetComarkContentOptions) => ReturnType
+      setComarkAst: (value: ComarkTree | string, options?: SetComarkContentOptions) => ReturnType
       /**
        * Replace editor content from a markdown string (parsed via
        * comark). Options have the same semantics as {@link setComarkAst}.
@@ -500,29 +506,28 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
     //     mount empty and re-apply when the parse resolves; the editor
     //     `update` event fires at that point. Same async semantics as
     //     `setComarkMarkdown`.
-    //   - `string` + `contentType: 'json'` → JSON.parse synchronously,
-    //     route by shape (Comark AST vs PM JSON). Mount synchronously.
+    //   - `string` + `contentType: 'json'` → strict PM JSON. Pass
+    //     through to Tiptap's pipeline; AST strings should use
+    //     `setComarkAst(string)` instead.
+    //   - `string` + `contentType: 'html'` → Tiptap's stock HTML path.
     //   - `object` shaped like a Comark tree → apply via `setComarkAst`
     //     synchronously (Tiptap can't construct from a `ComarkTree`).
-    //   - everything else (HTML strings, PM JSON objects, Fragment,
-    //     ProseMirrorNode, …) — leave `options.content` alone and let
-    //     Tiptap's pipeline handle it.
+    //   - everything else (PM JSON objects, Fragment, ProseMirrorNode,
+    //     …) — leave `options.content` alone and let Tiptap's pipeline
+    //     handle it.
     const opts = this.editor.options
     if (typeof opts.content === 'string' && opts.content !== '') {
       if (opts.contentType === 'html') {
-        // Pass-through to Tiptap's HTML pipeline.
+        // Pass-through to Tiptap's stock HTML pipeline.
       } else if (opts.contentType === 'json') {
+        // Strict PM JSON — JSON.parse synchronously and hand the
+        // resulting object to Tiptap. We do the parse ourselves
+        // because the lib doesn't ship `@tiptap/markdown`'s
+        // MarkdownManager (which is what teaches stock Tiptap to
+        // accept JSON strings on its own). AST strings should use
+        // `setComarkAst(string)` instead.
         const parsed = safeJsonParse(opts.content, 'construction-time content')
-        if (parsed !== undefined) {
-          opts.content = isComarkTreeLike(parsed) ? null : (parsed as typeof opts.content)
-          if (isComarkTreeLike(parsed)) {
-            const tree = parsed
-            queueMicrotask(() => {
-              if (this.editor.isDestroyed) return
-              this.editor.commands.setComarkAst(tree, { emitUpdate: false })
-            })
-          }
-        }
+        opts.content = parsed === undefined ? '' : (parsed as typeof opts.content)
       } else {
         const markdown = opts.content
         opts.content = ''
@@ -558,8 +563,26 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
   addCommands() {
     return {
       setComarkAst:
-        (tree: ComarkTree, options?: SetComarkContentOptions) =>
+        (value: ComarkTree | string, options?: SetComarkContentOptions) =>
         ({ commands }) => {
+          // String form: JSON.parse + AST shape validation. Mirrors
+          // `setComarkMarkdown(string)` so consumers have a single,
+          // explicit entry point for AST input regardless of whether
+          // they're holding the tree as an object or a JSON-encoded
+          // string. Bad shapes return false rather than coerce.
+          let tree: ComarkTree
+          if (typeof value === 'string') {
+            const parsed = safeJsonParse(value, 'setComarkAst')
+            if (parsed === undefined || !isComarkTreeLike(parsed)) {
+              if (typeof console !== 'undefined') {
+                console.warn('[comark] setComarkAst: string input did not parse to a Comark AST')
+              }
+              return false
+            }
+            tree = parsed
+          } else {
+            tree = value
+          }
           this.storage.frontmatter = { ...tree.frontmatter }
           this.storage.meta = { ...tree.meta }
           const doc = comarkToPmDoc(tree, this.storage.helpers)
@@ -595,8 +618,10 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
       //
       // Escape hatches via `{ contentType }` (string inputs only):
       //   - `'html'` — let Tiptap parse the string as HTML, sync.
-      //   - `'json'` — `JSON.parse`, then route by shape (Comark AST vs
-      //                PM JSON). Sync for PM JSON, sync for Comark AST.
+      //   - `'json'` — strict PM JSON via `JSON.parse`, sync. Comark
+      //                AST strings have an explicit home on
+      //                `setComarkAst(string)`; we don't shape-sniff
+      //                inside `'json'` to keep the routing predictable.
       //
       // Trade-off on the markdown path: comark.parse is async-only, so
       // a string seed schedules the actual content application a
@@ -620,14 +645,10 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
           return baseSetContent(content as Content, options)(props)
         }
         if (options?.contentType === 'json') {
+          // Strict PM JSON. AST strings have an explicit home on
+          // `setComarkAst(string)`; we don't shape-sniff here.
           const parsed = safeJsonParse(content, 'setContent')
           if (parsed === undefined) return false
-          if (isComarkTreeLike(parsed)) {
-            this.storage.frontmatter = { ...parsed.frontmatter }
-            this.storage.meta = { ...parsed.meta }
-            const doc = comarkToPmDoc(parsed, this.storage.helpers)
-            return baseSetContent(doc as unknown as Content, options)(props)
-          }
           return baseSetContent(parsed as Content, options)(props)
         }
         parse(content)
@@ -659,10 +680,6 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
         if (options?.contentType === 'json') {
           const parsed = safeJsonParse(value, 'insertContent')
           if (parsed === undefined) return false
-          if (isComarkTreeLike(parsed)) {
-            const payload = comarkTreeToInsertPayload(parsed, this.storage.helpers, options?.inline)
-            return baseInsertContent(payload, options)(props)
-          }
           return baseInsertContent(parsed as Content, options)(props)
         }
         parse(value)
@@ -690,10 +707,6 @@ export const ComarkSerializer = Extension.create<ComarkSerializerOptions, Comark
         if (options?.contentType === 'json') {
           const parsed = safeJsonParse(value, 'insertContentAt')
           if (parsed === undefined) return false
-          if (isComarkTreeLike(parsed)) {
-            const payload = comarkTreeToInsertPayload(parsed, this.storage.helpers, options?.inline)
-            return baseInsertContentAt(position, payload, options)(props)
-          }
           return baseInsertContentAt(position, parsed as Content, options)(props)
         }
         parse(value)

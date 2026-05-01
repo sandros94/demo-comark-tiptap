@@ -9,22 +9,69 @@ import {
 } from '@comark/tiptap'
 import {
   computed,
+  isRef,
   onBeforeUnmount,
   onMounted,
   shallowRef,
+  toValue,
+  watch,
   type ComputedRef,
+  type MaybeRefOrGetter,
   type ShallowRef,
 } from 'vue'
 import type { ComarkVueComponentExports } from './define-component'
 
+/**
+ * Vue-layer content flavor. Drives both input dispatch (which command
+ * to call) and output read-back (which getter to use).
+ *
+ *   - `'markdown'` (default) — `comark.parse` (async) on input,
+ *      `getMarkdown()` on output. `string` value type.
+ *   - `'html'`               — Tiptap's stock HTML pipeline. `string`
+ *      value type.
+ *   - `'json'`               — strict PM JSON. `JSONContent` (object)
+ *      or JSON-encoded `string` value type.
+ *   - `'ast'`                — Comark AST. `ComarkTree` object or
+ *      JSON-encoded `string` value type. Routes to `setComarkAst` /
+ *      `getAst` (no global `contentType` augmentation involved, so
+ *      it's safe alongside `@tiptap/markdown`).
+ *
+ * `'ast'` is Vue-layer only. The libraries below it accept its inputs
+ * via the explicit `setComarkAst(value)` command, which takes both
+ * `ComarkTree` and JSON-encoded strings.
+ */
+export type ContentType = 'markdown' | 'html' | 'json' | 'ast'
+
+/**
+ * Anything that can serve as `content`. The composable accepts the
+ * three flavor-relevant shapes and routes by `contentType`.
+ *
+ * Wrap in a `Ref` / getter for reactive bidirectional sync (every
+ * change pushes into the editor); pass a plain value for an
+ * initial-only seed.
+ */
+export type ContentValue = ComarkTree | JSONContent | string
+
 export interface UseComarkEditorOptions {
   /**
-   * Initial document. Read once at mount; not reactive. Accepts a Comark
-   * AST (`{ nodes, frontmatter, meta }`), PM JSON, or a markdown string
-   * (parsed via Comark, async). To replace content reactively after
-   * mount, call `setAst` / `setMarkdown` / `setJson`.
+   * Initial / reactive document. Resolved through Vue's `toValue` —
+   * pass a `Ref<T>` or `() => T` for live binding (changes propagate
+   * into the editor), or a plain value for a one-shot mount-time seed.
+   *
+   * Object inputs are auto-detected on bare `setContent` (`ComarkTree`
+   * shapes route through `setComarkAst`); string inputs follow
+   * `contentType`.
    */
-  initial?: ComarkTree | JSONContent | string
+  content?: MaybeRefOrGetter<ContentValue | undefined>
+
+  /**
+   * Flavor of the bound `content`. Drives both input dispatch (which
+   * underlying command runs) and the output flavor used by
+   * `<ComarkEditor>` for emit.
+   *
+   * @default 'markdown'
+   */
+  contentType?: ContentType
 
   /** User-defined Comark components (block or inline). Read once at mount. */
   components?: ReadonlyArray<ComarkVueComponentExports>
@@ -63,21 +110,27 @@ export interface UseComarkEditorOptions {
 }
 
 /**
- * Setter context — passed to the functional-update form of `setAst` /
- * `setMarkdown` / `setJson`. Lets the caller derive the next value from
- * the current state without an extra `getAst()` round-trip.
+ * Setter context — passed to the functional-update form of
+ * `setContent`. Lets the caller derive the next value from the current
+ * state without an extra `getXxx()` round-trip.
  */
 export interface SetterContext<T> {
-  /** Current content in the setter's flavor. */
+  /** Current content read in the requested flavor. */
   content: T
   /** The live editor instance. */
   editor: Editor
 }
 
-/** A direct value or a functional update of the current state. */
-export type SetterInput<T> = T | ((ctx: SetterContext<T>) => T)
-/** Async-aware variant for markdown (where reading is async). */
-export type AsyncSetterInput<T> = T | ((ctx: SetterContext<T>) => T | Promise<T>)
+export type SetterInput<T> = T | ((ctx: SetterContext<T>) => T | Promise<T>)
+
+export interface SetContentOptions extends SetComarkContentOptions {
+  /**
+   * Override the composable-level `contentType` for this single call.
+   * Useful in toolbars that need to set HTML for one paste handler
+   * while the bound model stays in markdown, etc.
+   */
+  contentType?: ContentType
+}
 
 export interface UseComarkEditorReturn {
   /** Tiptap editor instance. `undefined` until mount. */
@@ -86,31 +139,14 @@ export interface UseComarkEditorReturn {
   isReady: ComputedRef<boolean>
 
   /**
-   * Replace content from a Comark AST (or derive it from the current
-   * state). `options` is forwarded to `commands.setComarkAst` — pass
-   * `{ emitUpdate: false }` to apply silently, etc.
+   * Replace content. Routes by `contentType` (option-level default,
+   * overridable per call). Accepts either a value or a functional
+   * updater that receives the current content in the matching flavor.
+   *
+   * Returns a `Promise<void>` because the markdown path is async; for
+   * other flavors the promise resolves on the same microtask.
    */
-  setAst: (input: SetterInput<ComarkTree>, options?: SetComarkContentOptions) => void
-  /**
-   * Replace content from markdown (or derive it from the current
-   * state). `options` is forwarded to `commands.setComarkMarkdown`.
-   */
-  setMarkdown: (input: AsyncSetterInput<string>, options?: SetComarkContentOptions) => Promise<void>
-  /**
-   * Replace content from PM JSON (or derive it from the current state).
-   * `options` is forwarded to `commands.setContent`; only `emitUpdate`
-   * and `errorOnInvalidContent` are honored — `parseOptions` is omitted
-   * since PM JSON does not flow through the HTML parser.
-   */
-  setJson: (input: SetterInput<JSONContent>, options?: SetComarkContentOptions) => void
-  /**
-   * Escape hatch: replace content from an HTML string (or derive it
-   * from the current state). Forwards to `commands.setContent` with
-   * `contentType: 'html'`, bypassing the markdown parser entirely.
-   * Use when the source is genuinely HTML (paste handlers, server-
-   * rendered fragments, etc.).
-   */
-  setHtml: (input: SetterInput<string>, options?: SetComarkContentOptions) => void
+  setContent: (input: SetterInput<ContentValue>, options?: SetContentOptions) => Promise<void>
 
   /** Read the current state in any flavor. Returns `null` until ready. */
   getAst: () => ComarkTree | null
@@ -127,9 +163,71 @@ export interface UseComarkEditorReturn {
   getHtml: () => string | null
 }
 
+const DEFAULT_CONTENT_TYPE: ContentType = 'markdown'
+
+/**
+ * Apply a content value to the editor with the right command for the
+ * requested flavor. Centralised so `setContent` and the prop-driven
+ * watcher use exactly the same dispatch.
+ */
+function applyContent(
+  editor: Editor,
+  value: ContentValue,
+  contentType: ContentType,
+  options: SetComarkContentOptions = {},
+): void {
+  const baseOpts = {
+    emitUpdate: options.emitUpdate ?? true,
+    errorOnInvalidContent: options.errorOnInvalidContent,
+  }
+  switch (contentType) {
+    case 'ast':
+      // setComarkAst handles both ComarkTree objects and JSON-encoded
+      // strings; PM JSON / markdown shapes here would be a misuse and
+      // return false.
+      editor.commands.setComarkAst(value as ComarkTree | string, baseOpts)
+      return
+    case 'markdown':
+      // String → comark.parse (async). Object content with a
+      // 'markdown' contentType is unusual; rather than misroute it we
+      // fall through to setContent which auto-detects ComarkTree
+      // objects and otherwise treats it as PM JSON.
+      if (typeof value === 'string') {
+        editor.commands.setComarkMarkdown(value, baseOpts)
+      } else {
+        editor.commands.setContent(value as Content, baseOpts)
+      }
+      return
+    case 'html':
+      editor.commands.setContent(value as Content, { ...baseOpts, contentType: 'html' })
+      return
+    case 'json':
+      editor.commands.setContent(value as Content, { ...baseOpts, contentType: 'json' })
+      return
+  }
+}
+
+/** Read the current editor content in the requested flavor. */
+function readContent(editor: Editor, contentType: ContentType): ContentValue | null {
+  switch (contentType) {
+    case 'ast':
+      return editor.storage.comark.getAst()
+    case 'markdown':
+      // Reads are async only on the markdown path; we return a Promise
+      // here would force callers to await every read. The setter's
+      // functional-updater form awaits the promise itself.
+      return null
+    case 'html':
+      return editor.getHTML()
+    case 'json':
+      return editor.getJSON() as JSONContent
+  }
+}
+
 export function useComarkEditor(options: UseComarkEditorOptions = {}): UseComarkEditorReturn {
   const {
-    initial,
+    content,
+    contentType = DEFAULT_CONTENT_TYPE,
     components = [],
     extensions = [],
     kitOptions,
@@ -153,20 +251,41 @@ export function useComarkEditor(options: UseComarkEditorOptions = {}): UseComark
     ...extensions,
   ]
 
-  // Comark trees and PM JSON go through dedicated commands after the
-  // editor is mounted; only HTML / markdown strings flow into Tiptap's
-  // own constructor `content` slot. The serializer's onBeforeCreate
-  // hook intercepts string content there and reroutes through Comark.
-  const initialContent: Content | undefined = isComarkTreeLike(initial)
+  // Resolve the initial seed once. Reactive sources are watched
+  // post-mount; this captures the value at construction time.
+  const initialValue = toValue(content)
+
+  // Decide whether the seed flows through Tiptap's constructor or via
+  // a separate `setComarkAst` call after mount. Two cases need the
+  // explicit-AST path:
+  //   - `contentType: 'ast'` (with either an object or a JSON-encoded
+  //     string): Tiptap's stock `contentType` enum doesn't include
+  //     `'ast'`, so passing it to the constructor would either error
+  //     or be silently misinterpreted as markdown.
+  //   - object input that auto-detects as a `ComarkTree`: not a shape
+  //     Tiptap's constructor knows how to consume.
+  const useAstSeed =
+    initialValue !== undefined && (contentType === 'ast' || isComarkTreeLike(initialValue))
+
+  const tiptapContent: Content | undefined = useAstSeed
     ? undefined
-    : (initial as Content | undefined)
+    : ((initialValue as Content | undefined) ?? undefined)
+
+  const tiptapContentType: 'markdown' | 'html' | 'json' | undefined =
+    initialValue === undefined || useAstSeed
+      ? undefined
+      : (contentType as 'markdown' | 'html' | 'json')
 
   // Tiptap touches the DOM during construction — defer to client mount.
   onMounted(() => {
     const instance = new Editor({
       ...editorOptions,
       extensions: allExtensions,
-      content: initialContent,
+      content: tiptapContent,
+      // The serializer's `onBeforeCreate` reads `editor.options.contentType`
+      // and dispatches per branch. We forward our flavor through except
+      // for 'ast' (handled manually below) and the no-seed case.
+      ...(tiptapContentType ? { contentType: tiptapContentType } : {}),
       onCreate({ editor: e }) {
         onCreate?.(e as Editor)
       },
@@ -178,81 +297,68 @@ export function useComarkEditor(options: UseComarkEditorOptions = {}): UseComark
       },
     })
 
-    // Apply the initial Comark tree synchronously, BEFORE assigning
-    // `editor.value`. Two reasons:
+    // Apply a Comark AST (object or JSON-encoded string) synchronously,
+    // BEFORE assigning `editor.value`. Two reasons:
     //   1. Tiptap dispatches its own `create` event asynchronously
     //      (via `setTimeout(0)` inside the constructor). Applying
     //      initial content from `onCreate` would land *after* the
     //      consuming component's `onMounted` runs, racing any
     //      prop-driven setter the consumer kicks off there.
-    //   2. We pass `emitUpdate: false` because the consumer already
-    //      holds this value — it IS the seed they passed in. Echoing
-    //      it back as an `update` event could propagate as a fake
-    //      change and clobber whatever they bind it to.
-    if (isComarkTreeLike(initial)) {
-      instance.commands.setComarkAst(initial as ComarkTree, { emitUpdate: false })
+    //   2. We pass `emitUpdate: false` because direct composable
+    //      consumers don't expect the seed itself to fire their
+    //      `onUpdate` hook. The component layer (`<ComarkEditor>`)
+    //      handles its own initial v-model sync via `onCreate` since
+    //      it can't rely on `update` here.
+    if (initialValue !== undefined && (contentType === 'ast' || isComarkTreeLike(initialValue))) {
+      instance.commands.setComarkAst(initialValue as ComarkTree | string, { emitUpdate: false })
     }
 
     editor.value = instance
+
+    // Reactive content: watch for outer changes and push them in.
+    // Plain values (no ref/getter) are caught at mount above and never
+    // re-applied. We only set up the watcher when the source is
+    // actually reactive, so non-reactive consumers don't pay the cost.
+    if (isRef(content) || typeof content === 'function') {
+      watch(
+        () => toValue(content as MaybeRefOrGetter<ContentValue | undefined>),
+        (next) => {
+          if (next === undefined) return
+          if (instance.isDestroyed) return
+          applyContent(instance, next, contentType)
+        },
+      )
+    }
   })
 
   onBeforeUnmount(() => {
     editor.value?.destroy()
   })
 
-  // Setters — direct value or functional-update callback. `options` is
-  // forwarded to the underlying Tiptap command so callers can control
-  // `emitUpdate` / `errorOnInvalidContent` per-call.
-
-  const setAst = (input: SetterInput<ComarkTree>, options?: SetComarkContentOptions): void => {
-    const e = editor.value
-    if (!e) return
-    const next =
-      typeof input === 'function' ? input({ content: e.storage.comark.getAst(), editor: e }) : input
-    e.commands.setComarkAst(next, options)
-  }
-
-  const setMarkdown = async (
-    input: AsyncSetterInput<string>,
-    options?: SetComarkContentOptions,
+  // Imperative setter — accepts a value or a functional updater.
+  const setContent = async (
+    input: SetterInput<ContentValue>,
+    callOptions: SetContentOptions = {},
   ): Promise<void> => {
     const e = editor.value
     if (!e) return
-    let next: string
+    const ct = callOptions.contentType ?? contentType
+    let next: ContentValue
     if (typeof input === 'function') {
-      const current = await e.storage.comark.getMarkdown()
-      next = await input({ content: current, editor: e })
+      const current =
+        ct === 'markdown'
+          ? ((await e.storage.comark.getMarkdown()) as ContentValue)
+          : (readContent(e, ct) as ContentValue)
+      next = await (
+        input as (ctx: SetterContext<ContentValue>) => ContentValue | Promise<ContentValue>
+      )({
+        content: current,
+        editor: e,
+      })
     } else {
       next = input
     }
-    e.commands.setComarkMarkdown(next, options)
-  }
-
-  const setJson = (input: SetterInput<JSONContent>, options?: SetComarkContentOptions): void => {
-    const e = editor.value
-    if (!e) return
-    const next =
-      typeof input === 'function'
-        ? input({ content: e.getJSON() as JSONContent, editor: e })
-        : input
-    e.commands.setContent(next as Content, {
-      emitUpdate: options?.emitUpdate ?? true,
-      errorOnInvalidContent: options?.errorOnInvalidContent,
-    })
-  }
-
-  const setHtml = (input: SetterInput<string>, options?: SetComarkContentOptions): void => {
-    const e = editor.value
-    if (!e) return
-    const next = typeof input === 'function' ? input({ content: e.getHTML(), editor: e }) : input
-    // `contentType: 'html'` flips the serializer override into
-    // pass-through mode for this string — the markdown parser is
-    // skipped and Tiptap's stock HTML pipeline handles the seed.
-    e.commands.setContent(next, {
-      emitUpdate: options?.emitUpdate ?? true,
-      errorOnInvalidContent: options?.errorOnInvalidContent,
-      contentType: 'html',
-    })
+    applyContent(e, next, ct, callOptions)
   }
 
   // Getters
@@ -269,10 +375,7 @@ export function useComarkEditor(options: UseComarkEditorOptions = {}): UseComark
   return {
     editor,
     isReady,
-    setAst,
-    setMarkdown,
-    setJson,
-    setHtml,
+    setContent,
     getAst,
     getMarkdown,
     getJson,

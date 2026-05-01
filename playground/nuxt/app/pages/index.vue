@@ -135,7 +135,8 @@ async function resetToSeed() {
 
     <UComarkEditor
       ref="test"
-      v-model:ast="tree"
+      v-model="tree"
+      content-type="ast"
       :components="components"
       class="rounded-lg border border-default p-4 min-h-100 focus:outline-none"
       data-test="editor"

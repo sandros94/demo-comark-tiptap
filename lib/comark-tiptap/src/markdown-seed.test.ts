@@ -399,12 +399,10 @@ describe('ComarkSerializer overrides — `contentType: "html"` escape hatch', ()
   })
 })
 
-describe('ComarkSerializer overrides — `contentType: "json"` (PM JSON or Comark AST)', () => {
-  // String inputs with `contentType: 'json'` are JSON.parse'd, then
-  // routed by shape: anything with a `nodes` array is a Comark AST and
-  // goes through `setComarkAst`; anything else is treated as PM JSON
-  // and falls into the stock `setContent` path. Both routes are
-  // synchronous (no comark.parse hop).
+describe('ComarkSerializer overrides — `contentType: "json"` (strict PM JSON)', () => {
+  // String inputs with `contentType: 'json'` are passed straight to
+  // Tiptap's stock pipeline as PM JSON. AST strings have an explicit
+  // home on `setComarkAst(string)` — see the next describe block.
 
   it('routes a JSON-stringified PM doc through the stock pipeline (synchronous)', () => {
     const editor = track(makeEditor())
@@ -423,7 +421,50 @@ describe('ComarkSerializer overrides — `contentType: "json"` (PM JSON or Comar
     expect(blocks[0]?.content?.[0]?.text).toBe('PM JSON')
   })
 
-  it('routes a JSON-stringified Comark AST through `setComarkAst` (synchronous)', () => {
+  it('seeds a JSON-stringified PM doc via the constructor `content` + `contentType: "json"`', () => {
+    const pm = {
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: 'PM seed' }] },
+      ],
+    }
+
+    const editor = track(
+      makeEditor({
+        content: JSON.stringify(pm),
+        contentType: 'json',
+      }),
+    )
+
+    // Synchronous — `'json'` flows through Tiptap's pipeline, no
+    // microtask hop.
+    const blocks = getDoc(editor).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(4)
+  })
+})
+
+describe('ComarkSerializer — `setComarkAst` accepts both objects and JSON-encoded strings', () => {
+  // The explicit AST entry point. Mirrors `setComarkMarkdown(string)`:
+  // give it whatever shape your input is in (object or JSON-encoded
+  // string), and it lands as a Comark AST.
+
+  it('applies a `ComarkTree` object', () => {
+    const editor = track(makeEditor())
+    editor.commands.setComarkAst({
+      nodes: [['h1', {}, 'object input']],
+      frontmatter: { title: 'T' },
+      meta: {},
+    })
+
+    const blocks = getDoc(editor).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(1)
+    expect(blocks[0]?.content?.[0]?.text).toBe('object input')
+    expect(editor.storage.comark.frontmatter).toEqual({ title: 'T' })
+  })
+
+  it('parses a JSON-encoded AST string and applies it (synchronous)', () => {
     const editor = track(makeEditor())
     const tree = {
       nodes: [['h1', {}, 'AST string seed']],
@@ -431,24 +472,43 @@ describe('ComarkSerializer overrides — `contentType: "json"` (PM JSON or Comar
       meta: {},
     }
 
-    editor.commands.setContent(JSON.stringify(tree), { contentType: 'json' })
+    editor.commands.setComarkAst(JSON.stringify(tree))
 
     const blocks = getDoc(editor).content ?? []
     expect(blocks[0]?.type).toBe('heading')
     expect(blocks[0]?.attrs?.level).toBe(1)
     expect(blocks[0]?.content?.[0]?.text).toBe('AST string seed')
-    // Frontmatter / meta land on the serializer storage too.
     expect(editor.storage.comark.frontmatter).toEqual({ title: 'T' })
   })
 
-  it('returns false on a malformed JSON string (no throw, no apply)', () => {
+  it('returns false when the string is malformed JSON', () => {
+    // Both error paths emit a `console.warn` to help users debug a
+    // misuse. Silence + assert here so the test output stays clean
+    // AND the warning contract is locked in (regression catches a
+    // future refactor that drops the warn).
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const editor = track(makeEditor())
-    const result = editor.commands.setContent('{invalid', { contentType: 'json' })
+    const result = editor.commands.setComarkAst('{not-json')
     expect(result).toBe(false)
-    // Editor stays empty (or carries TrailingNode's empty paragraph).
-    const blocks = getDoc(editor).content ?? []
-    for (const b of blocks) expect(b.type).toBe('paragraph')
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/setComarkAst|did not parse/))
+    warn.mockRestore()
   })
+
+  it('returns false when the string is valid JSON but not an AST shape', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const editor = track(makeEditor())
+    // Valid JSON, but no `nodes` array — should be rejected, not coerced.
+    const result = editor.commands.setComarkAst(JSON.stringify({ type: 'doc', content: [] }))
+    expect(result).toBe(false)
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/setComarkAst|did not parse/))
+    warn.mockRestore()
+  })
+})
+
+describe('ComarkSerializer overrides — Comark AST objects auto-detected', () => {
+  // Object auto-detection on bare `setContent` / `insertContent` /
+  // `insertContentAt` — an ergonomic shorthand for "if it looks like an
+  // AST, treat it like one." Strings always require explicit routing.
 
   it('auto-detects a Comark AST OBJECT passed to setContent (no contentType needed)', () => {
     const editor = track(makeEditor())
@@ -458,8 +518,6 @@ describe('ComarkSerializer overrides — `contentType: "json"` (PM JSON or Comar
       meta: {},
     }
 
-    // No `contentType` — the serializer notices the `nodes` array
-    // shape and routes through `setComarkAst` synchronously.
     editor.commands.setContent(tree as unknown as Parameters<typeof editor.commands.setContent>[0])
 
     const blocks = getDoc(editor).content ?? []
@@ -526,47 +584,5 @@ describe('ComarkSerializer overrides — `contentType: "json"` (PM JSON or Comar
     expect(blocks[0]?.type).toBe('heading')
     expect(blocks[0]?.attrs?.level).toBe(2)
     expect(editor.storage.comark.frontmatter).toEqual({ title: 'from-tree' })
-  })
-
-  it('seeds a JSON-stringified Comark AST via the constructor `content` + `contentType: "json"`', async () => {
-    const tree = {
-      nodes: [['h3', {}, 'json-string seed']],
-      frontmatter: {},
-      meta: {},
-    }
-
-    const editor = track(
-      makeEditor({
-        content: JSON.stringify(tree),
-        contentType: 'json',
-      }),
-    )
-
-    await flushMicrotasks()
-
-    const blocks = getDoc(editor).content ?? []
-    expect(blocks[0]?.type).toBe('heading')
-    expect(blocks[0]?.attrs?.level).toBe(3)
-  })
-
-  it('seeds a JSON-stringified PM doc via the constructor `content` + `contentType: "json"`', () => {
-    const pm = {
-      type: 'doc',
-      content: [
-        { type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: 'PM seed' }] },
-      ],
-    }
-
-    const editor = track(
-      makeEditor({
-        content: JSON.stringify(pm),
-        contentType: 'json',
-      }),
-    )
-
-    // Synchronous — no microtask hop since this is the PM-JSON branch.
-    const blocks = getDoc(editor).content ?? []
-    expect(blocks[0]?.type).toBe('heading')
-    expect(blocks[0]?.attrs?.level).toBe(4)
   })
 })

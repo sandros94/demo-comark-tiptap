@@ -65,22 +65,33 @@ editor.commands.insertContent('<em>i</em>', { contentType: 'html', inline: true 
 editor.commands.insertContentAt(pos, '<h2>Section</h2>', { contentType: 'html' })
 ```
 
-For JSON-stringified content (either flavor), pass `{ contentType: 'json' }`. The serializer `JSON.parse`s it and routes by shape — `{ nodes: [...] }` is a Comark AST and goes through the AST application path; everything else is treated as PM JSON. Both branches are synchronous:
+For JSON-stringified PM JSON, pass `{ contentType: 'json' }` — the serializer `JSON.parse`s it and hands the resulting object to Tiptap's stock pipeline. **Strict PM JSON only**: AST strings have an explicit home on `setComarkAst(string)` (see below). Both branches are synchronous:
 
 ```ts
-editor.commands.setContent(JSON.stringify(comarkTree), { contentType: 'json' })
 editor.commands.setContent(JSON.stringify(pmDoc), { contentType: 'json' })
+editor.commands.setComarkAst(JSON.stringify(comarkTree))
 ```
 
 OBJECT inputs are auto-detected — passing a `ComarkTree` directly works without `contentType`:
 
 ```ts
-editor.commands.setContent(comarkTree)                       // → setComarkAst path
+editor.commands.setContent(comarkTree)                       // → AST application path
 editor.commands.insertContent(comarkTree)                    // → insert blocks
 editor.commands.setContent({ type: 'doc', content: [...] })  // → stock PM JSON path
 ```
 
 The `'markdown'` value is the explicit form of the default — pass it for self-documentation, or leave `contentType` off entirely for the same behavior. PM JSON, `Fragment`, `ProseMirrorNode`, and the empty string ignore `contentType` and always pass through synchronously.
+
+### Explicit AST entry point
+
+`setComarkAst` accepts both shapes — a `ComarkTree` object or a JSON-encoded string — so callers have a single explicit handle for AST input. Mirrors `setComarkMarkdown(string)`. Bad shapes return `false` rather than coerce.
+
+```ts
+editor.commands.setComarkAst({ nodes: [['p', {}, 'Hi']], frontmatter: {}, meta: {} })
+editor.commands.setComarkAst('{"nodes":[["p",{},"Hi"]],"frontmatter":{},"meta":{}}')
+```
+
+`setComarkMarkdown` is the parallel for markdown strings.
 
 ### `inline: true`
 

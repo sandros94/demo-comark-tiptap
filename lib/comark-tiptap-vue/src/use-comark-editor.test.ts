@@ -1,8 +1,10 @@
 /**
  * Coverage for `useComarkEditor` — the Vue-layer composable that wraps
- * a Tiptap `Editor` configured with `ComarkKit`. Covers every seed
- * flavor (AST / markdown string / PM JSON), every imperative setter,
- * and the unmount-cleanup contract.
+ * a Tiptap `Editor` configured with `ComarkKit`. The composable's
+ * surface collapsed to a single `setContent` setter + `contentType`
+ * dispatch + `MaybeRefOrGetter` content. Tests cover every flavor on
+ * both the seed path and the runtime setter, plus the unmount-cleanup
+ * contract.
  *
  * The composable uses `onMounted` / `onBeforeUnmount`, so each test
  * mounts a tiny Vue component that calls the composable in `setup`
@@ -14,7 +16,7 @@
 
 import type { Editor, JSONContent } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createApp, defineComponent, h, nextTick, type App } from 'vue'
+import { createApp, defineComponent, h, nextTick, ref, shallowRef, type App } from 'vue'
 import type { ComarkTree } from '@comark/tiptap'
 import {
   useComarkEditor,
@@ -51,16 +53,11 @@ interface Mounted {
 }
 
 /**
- * Mount a synthetic component that calls `useComarkEditor(options)` and
- * exposes the return value. We don't render anything visible — the
- * editor doesn't need to be attached to a viewport for its commands
- * and storage to work in happy-dom.
- *
- * Implementation note: stash the return on a closure-scoped `let`
- * rather than a `ref` because `ref<{ editor: ShallowRef<...> }>` would
- * proxy through `reactive` and silently unwrap the nested refs at read
- * time — `m.result.editor.value` then yields `undefined` even after
- * the editor has constructed. `let` keeps the refs as refs.
+ * Mount a synthetic component that calls `useComarkEditor(options)`
+ * and exposes the return value. Implementation note: stash the return
+ * on a closure-scoped `let` rather than a `ref` because
+ * `ref<{ editor: ShallowRef<...> }>` would proxy through `reactive`
+ * and silently unwrap the nested refs at read time.
  */
 function mount(options: UseComarkEditorOptions): Mounted {
   let captured: UseComarkEditorReturn | null = null
@@ -98,25 +95,24 @@ function getDoc(editor: Editor): JSONContent {
   return editor.getJSON() as JSONContent
 }
 
-describe('useComarkEditor — initial seed', () => {
-  it('mounts with a markdown string seed and parses it via the Comark pipeline', async () => {
-    const m = track(mount({ initial: '# Hello\n\nbody **strong**.\n' }))
+describe('useComarkEditor — initial seed (plain values)', () => {
+  it('mounts with a markdown string seed (default contentType)', async () => {
+    const m = track(mount({ content: '# Hello\n\nbody **strong**.\n' }))
 
-    // Two waits: Vue's scheduler has to flush so `onMounted` runs and
-    // `editor.value` is assigned, then the parsed-markdown seed lands
-    // when the editor fires its first `update` event.
+    // Two waits: Vue's scheduler has to flush so `onMounted` runs, then
+    // the parsed-markdown seed lands when the editor fires its first
+    // `update` event.
     await flushVueLifecycle()
     await nextUpdate(m.result.editor.value!)
 
     expect(m.result.isReady.value).toBe(true)
-    const json = m.result.editor.value!.getJSON() as JSONContent
-    const blocks = json.content ?? []
+    const blocks = getDoc(m.result.editor.value!).content ?? []
     expect(blocks[0]?.type).toBe('heading')
     expect(blocks[0]?.attrs?.level).toBe(1)
     expect(blocks[1]?.type).toBe('paragraph')
   })
 
-  it('mounts with a Comark AST seed and applies it via setComarkAst', async () => {
+  it('mounts with a Comark AST seed via contentType="ast"', async () => {
     const tree: ComarkTree = {
       nodes: [
         ['h2', {}, 'AST seed'],
@@ -125,7 +121,7 @@ describe('useComarkEditor — initial seed', () => {
       frontmatter: { title: 't' },
       meta: { x: 1 },
     }
-    const m = track(mount({ initial: tree }))
+    const m = track(mount({ content: tree, contentType: 'ast' }))
 
     // AST seed is applied via `setComarkAst({ emitUpdate: false })`
     // from inside `onMounted` — synchronous, no editor `update` event
@@ -133,21 +129,19 @@ describe('useComarkEditor — initial seed', () => {
     // available.
     await flushVueLifecycle()
 
-    const blocks = m.result.editor.value!.getJSON().content ?? []
+    const blocks = getDoc(m.result.editor.value!).content ?? []
     expect(blocks[0]?.type).toBe('heading')
     expect(blocks[0]?.attrs?.level).toBe(2)
-    // The ComarkSerializer copies frontmatter / meta into storage so
-    // round-tripping back to AST recovers them.
     expect(m.result.editor.value!.storage.comark.frontmatter).toEqual({ title: 't' })
     expect(m.result.editor.value!.storage.comark.meta).toEqual({ x: 1 })
   })
 
-  it('mounts with a PM JSON seed and applies it synchronously', async () => {
+  it('mounts with a PM JSON seed via contentType="json" + object', async () => {
     const json: JSONContent = {
       type: 'doc',
       content: [{ type: 'paragraph', content: [{ type: 'text', text: 'preset' }] }],
     }
-    const m = track(mount({ initial: json }))
+    const m = track(mount({ content: json, contentType: 'json' }))
 
     await flushVueLifecycle()
 
@@ -159,101 +153,186 @@ describe('useComarkEditor — initial seed', () => {
 
     await flushVueLifecycle()
 
-    const blocks = m.result.editor.value!.getJSON().content ?? []
-    // StarterKit's TrailingNode adds a trailing empty paragraph; an
-    // empty doc therefore has at least one block (the trailing one).
+    const blocks = getDoc(m.result.editor.value!).content ?? []
+    // StarterKit's TrailingNode adds a trailing empty paragraph.
     expect(blocks.length).toBeGreaterThanOrEqual(1)
     expect(blocks[0]?.type).toBe('paragraph')
   })
+
+  it('mounts with an HTML seed via contentType="html" (synchronous)', async () => {
+    const m = track(mount({ content: '<h2>HTML</h2>', contentType: 'html' }))
+
+    await flushVueLifecycle()
+
+    const blocks = getDoc(m.result.editor.value!).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(2)
+  })
 })
 
-describe('useComarkEditor — imperative setters', () => {
-  it('setMarkdown replaces content with a parsed markdown string', async () => {
-    const m = track(mount({ initial: 'first paragraph\n' }))
+describe('useComarkEditor — reactive content (ref / getter)', () => {
+  it('watches a Ref<string> and pushes external markdown changes in', async () => {
+    const md = ref('# Original\n')
+    const m = track(mount({ content: md }))
     await flushVueLifecycle()
     const editor = m.result.editor.value!
     await nextUpdate(editor) // seed lands
 
-    await m.result.setMarkdown('## Replaced\n\n- a\n- b\n')
-    await nextUpdate(editor) // replace lands
+    md.value = '## Changed\n'
+    await flushVueLifecycle()
+    await nextUpdate(editor) // external change lands
 
-    const blocks = editor.getJSON().content ?? []
+    const blocks = getDoc(editor).content ?? []
     expect(blocks[0]?.type).toBe('heading')
-    expect(blocks[1]?.type).toBe('bulletList')
+    expect(blocks[0]?.attrs?.level).toBe(2)
   })
 
-  it('setAst replaces content with a Comark tree', async () => {
-    const m = track(mount({ initial: '' }))
-    await flushVueLifecycle()
-
-    m.result.setAst({
-      nodes: [['h3', {}, 'set via AST']],
+  it('watches a getter (() => value) and propagates updates', async () => {
+    // shallowRef avoids Vue's deep `UnwrapRef` recursing through
+    // Comark's recursive `ComarkNode` union (TS2589 with plain `ref`).
+    const tree = shallowRef<ComarkTree>({
+      nodes: [['h1', {}, 'first']],
       frontmatter: {},
       meta: {},
     })
+    const m = track(mount({ content: () => tree.value, contentType: 'ast' }))
+    await flushVueLifecycle()
 
-    // `setComarkAst` chains through Tiptap commands synchronously once
-    // the AST is known — no async parse required.
-    const blocks = m.result.editor.value!.getJSON().content ?? []
+    tree.value = { nodes: [['h3', {}, 'second']], frontmatter: {}, meta: {} }
+    await flushVueLifecycle()
+
+    const blocks = getDoc(m.result.editor.value!).content ?? []
     expect(blocks[0]?.type).toBe('heading')
     expect(blocks[0]?.attrs?.level).toBe(3)
   })
 
-  it('setJson replaces content with PM JSON', async () => {
-    const m = track(mount({ initial: 'starter\n' }))
+  it('plain (non-reactive) content is mount-only and ignores later mutation', async () => {
+    // Plain object — composable doesn't watch it. We mutate the
+    // reference after mount and assert the editor doesn't follow.
+    const tree: ComarkTree = {
+      nodes: [['h1', {}, 'plain seed']],
+      frontmatter: {},
+      meta: {},
+    }
+    const m = track(mount({ content: tree, contentType: 'ast' }))
     await flushVueLifecycle()
-    // Wait for the markdown seed to land before replacing — otherwise
-    // a late seed update could clobber our explicit setJson.
-    await nextUpdate(m.result.editor.value!)
 
-    m.result.setJson({
-      type: 'doc',
-      content: [
-        { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'JSON' }] },
-      ],
-    })
+    // Mutating the same object reference doesn't trigger any watch —
+    // the composable only watches refs/getters.
+    tree.nodes = [['h6', {}, 'mutated']]
+    await flushVueLifecycle()
+
+    const blocks = getDoc(m.result.editor.value!).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(1) // still the original seed
+  })
+})
+
+describe('useComarkEditor — `setContent` imperative setter', () => {
+  it('routes by call-time contentType="markdown" (async)', async () => {
+    const m = track(mount({ content: 'first\n' }))
+    await flushVueLifecycle()
+    const editor = m.result.editor.value!
+    await nextUpdate(editor) // seed lands
+
+    await m.result.setContent('## Replaced\n\n- a\n- b\n', { contentType: 'markdown' })
+    await nextUpdate(editor)
+
+    const blocks = getDoc(editor).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[1]?.type).toBe('bulletList')
+  })
+
+  it('routes by call-time contentType="ast" (synchronous)', async () => {
+    const m = track(mount({ content: '' }))
+    await flushVueLifecycle()
+
+    await m.result.setContent(
+      {
+        nodes: [['h3', {}, 'set via AST']],
+        frontmatter: {},
+        meta: {},
+      },
+      { contentType: 'ast' },
+    )
+
+    // setComarkAst is synchronous once given an object.
+    const blocks = getDoc(m.result.editor.value!).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(3)
+  })
+
+  it('routes by call-time contentType="json" (synchronous)', async () => {
+    const m = track(mount({ content: 'starter\n' }))
+    await flushVueLifecycle()
+    await nextUpdate(m.result.editor.value!) // seed lands first
+
+    await m.result.setContent(
+      {
+        type: 'doc',
+        content: [
+          { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'JSON' }] },
+        ],
+      },
+      { contentType: 'json' },
+    )
 
     const blocks = getDoc(m.result.editor.value!).content ?? []
     expect(blocks[0]?.type).toBe('heading')
     expect(blocks[0]?.content?.[0]?.text).toBe('JSON')
   })
 
-  it('functional setMarkdown receives current content for derivation', async () => {
-    const m = track(mount({ initial: '# Original\n' }))
+  it('routes by call-time contentType="html" (synchronous)', async () => {
+    const m = track(mount({ content: '' }))
+    await flushVueLifecycle()
+
+    await m.result.setContent('<h2>Set via HTML</h2>', { contentType: 'html' })
+
+    const blocks = getDoc(m.result.editor.value!).content ?? []
+    expect(blocks[0]?.type).toBe('heading')
+    expect(blocks[0]?.attrs?.level).toBe(2)
+  })
+
+  it('functional setContent receives current content for derivation', async () => {
+    const m = track(mount({ content: '# Original\n', contentType: 'markdown' }))
     await flushVueLifecycle()
     const editor = m.result.editor.value!
-    await nextUpdate(editor) // seed lands
+    await nextUpdate(editor)
 
-    await m.result.setMarkdown(({ content }) => `${content.trimEnd()}\n\nappended\n`)
-    await nextUpdate(editor) // functional update lands
+    await m.result.setContent(
+      async ({ content }) => `${(content as string).trimEnd()}\n\nappended\n`,
+    )
+    await nextUpdate(editor)
 
     const blocks = getDoc(editor).content ?? []
-    expect(blocks[0]?.type).toBe('heading')
-    // Find the appended paragraph (might not be last because of
-    // TrailingNode's empty paragraph).
     const appended = blocks.find(
       (b) => b.type === 'paragraph' && (b.content ?? [])[0]?.text === 'appended',
     )
     expect(appended).toBeDefined()
   })
 
-  it('setHtml replaces content with HTML through the stock pipeline (synchronous)', async () => {
-    const m = track(mount({ initial: '' }))
+  it('uses the option-level contentType when no per-call contentType is given', async () => {
+    // No initial content: `setComarkAst('')` would warn on JSON.parse,
+    // and the seed isn't part of this test's contract — the per-call
+    // routing is.
+    const m = track(mount({ contentType: 'ast' }))
     await flushVueLifecycle()
 
-    m.result.setHtml('<h2>Set via HTML</h2>')
+    await m.result.setContent({
+      nodes: [['h4', {}, 'option-level routing']],
+      frontmatter: {},
+      meta: {},
+    })
 
-    // Synchronous — no `nextUpdate` needed because the HTML escape
-    // hatch bypasses comark.parse and runs `baseSetContent` directly.
-    const blocks = m.result.editor.value!.getJSON().content ?? []
+    const blocks = getDoc(m.result.editor.value!).content ?? []
     expect(blocks[0]?.type).toBe('heading')
-    expect(blocks[0]?.attrs?.level).toBe(2)
+    expect(blocks[0]?.attrs?.level).toBe(4)
   })
 })
 
 describe('useComarkEditor — getters', () => {
   it('getAst / getMarkdown / getJson / getHtml read the current content', async () => {
-    const m = track(mount({ initial: '# Hi\n' }))
+    const m = track(mount({ content: '# Hi\n' }))
     await flushVueLifecycle()
     await nextUpdate(m.result.editor.value!)
 
@@ -281,14 +360,12 @@ describe('useComarkEditor — lifecycle hooks', () => {
     const calls: unknown[] = []
     track(
       mount({
-        initial: '# x\n',
+        content: '# x\n',
         onCreate: (e) => calls.push(e),
       }),
     )
     // Tiptap dispatches its own `create` event asynchronously via
-    // `setTimeout(0)` inside the constructor — so onCreate doesn't run
-    // until a macrotask boundary, which `flushMicrotasks` provides.
-    // `flushVueLifecycle` alone (a microtask flush) isn't enough here.
+    // `setTimeout(0)` inside the constructor.
     await flushVueLifecycle()
     await flushMicrotasks()
 
@@ -296,27 +373,27 @@ describe('useComarkEditor — lifecycle hooks', () => {
     expect((calls[0] as { state: unknown }).state).toBeDefined()
   })
 
-  it('fires onUpdate when content changes via setMarkdown', async () => {
+  it('fires onUpdate when content changes via setContent', async () => {
     const calls: number[] = []
     const m = track(
       mount({
-        initial: '# x\n',
+        content: '# x\n',
         onUpdate: () => calls.push(Date.now()),
       }),
     )
     await flushVueLifecycle()
     const editor = m.result.editor.value!
-    await nextUpdate(editor) // seed update — counts as one
+    await nextUpdate(editor)
     const baseline = calls.length
 
-    await m.result.setMarkdown('# y\n')
-    await nextUpdate(editor) // replace update
+    await m.result.setContent('# y\n')
+    await nextUpdate(editor)
 
     expect(calls.length).toBeGreaterThan(baseline)
   })
 
   it('destroys the editor on unmount', async () => {
-    const m = mount({ initial: '# x\n' })
+    const m = mount({ content: '# x\n' })
     await flushVueLifecycle()
     const editor = m.result.editor.value!
     expect(editor.isDestroyed).toBe(false)
