@@ -55,7 +55,7 @@ export default defineConfig({
       {
         test: {
           name: 'e2e',
-          include: ['test/e2e/**/*.{test,spec}.ts'],
+          include: ['playground/nuxt/test/e2e/**/*.{test,spec}.ts'],
           environment: 'node',
         },
       },

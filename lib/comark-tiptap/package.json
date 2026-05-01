@@ -1,7 +1,7 @@
 {
   "name": "@comark/tiptap",
   "version": "0.0.0",
-  "description": "ComarkKit — a complete Tiptap editor schema for Comark documents. Edit markdown or AST directly.",
+  "description": "ComarkKit — a Comark-aware Tiptap kit built on StarterKit. Edit markdown, AST, or PM JSON.",
   "keywords": [
     "comark",
     "editor",
@@ -25,8 +25,11 @@
   },
   "peerDependencies": {
     "@tiptap/core": "^3.22.4",
-    "@tiptap/extension-document": "^3.22.4",
-    "@tiptap/extension-text": "^3.22.4",
+    "@tiptap/extension-code-block": "^3.22.4",
+    "@tiptap/extension-image": "^3.22.4",
+    "@tiptap/extension-table": "^3.22.4",
+    "@tiptap/pm": "^3.22.4",
+    "@tiptap/starter-kit": "^3.22.4",
     "comark": "^0.3.1"
   }
 }

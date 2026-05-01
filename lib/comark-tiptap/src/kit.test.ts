@@ -2,15 +2,15 @@ import { parse } from 'comark'
 import { renderMarkdown } from 'comark/render'
 import { describe, expect, it } from 'vitest'
 import { defineComarkComponent } from './extensions/component'
-import { comarkSpecs } from './kit'
 import { comarkToPmDoc, createSerializer, pmDocToComark } from './serializer'
+import { comarkSpecs } from './specs'
 import type { ComarkNode, ComarkTree } from './types'
 
 const baseHelpers = createSerializer(comarkSpecs)
 
 /**
- * Strip Comark's `$` source-position bag so the equality check focuses on
- * meaningful structure.
+ * Strip Comark's `$` source-position bag so the equality check focuses
+ * on meaningful structure.
  */
 function cleanTree(tree: ComarkTree): ComarkTree {
   return {
@@ -85,8 +85,9 @@ describe('full-document round-trip', () => {
   })
 
   it('renders the resulting AST back to markdown via comark/render', async () => {
-    // A second round-trip through `renderMarkdown` confirms the AST our
-    // editor produces is one Comark itself can serialize without choking.
+    // A second round-trip through `renderMarkdown` confirms the AST
+    // our editor produces is one Comark itself can serialize without
+    // choking.
     const md = '# Hello\n\nA **B** [link](/x).\n'
     const tree = await rt(md)
     const out = await renderMarkdown(tree)

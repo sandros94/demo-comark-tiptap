@@ -5,7 +5,6 @@
 import { Editor } from '@tiptap/core'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ComarkKit } from './kit'
-import { ComarkSerializer } from './serializer'
 import { COMARK_STYLE_MARKER, comarkStyle, injectComarkStyles } from './style'
 
 function clearStyleTags(): void {
@@ -32,13 +31,10 @@ describe('comarkStyle payload', () => {
     expect(comarkStyle).not.toContain('!important')
   })
 
-  // Regression: Every kit selector must skip NodeView-owned hosts so consumers
-  // providing a NodeView keep full control of the rendered output.
+  // Regression: Every kit selector must skip NodeView-owned hosts so
+  // consumers providing a NodeView keep full control of the rendered
+  // output.
   it('excludes NodeView wrappers from every kit selector', () => {
-    // Walk every rule (`selector { … }`) and pick the ones that name
-    // a kit-specific marker. Each must also include the NodeView
-    // exclusion or a consumer's NodeView host will receive our
-    // `::before` / padding / border on top of theirs.
     const ruleSelectors = comarkStyle.match(/[^{}]+(?=\s*\{)/g) ?? []
     const kitSelectors = ruleSelectors.filter((s) =>
       /\[data-comark-(comment|template|component)\]/.test(s),
@@ -72,10 +68,10 @@ describe('injectComarkStyles', () => {
     expect(tag?.getAttribute('nonce')).toBe('abc123')
   })
 
-  it('returns null in environments without `document` (ssr / node)', async () => {
+  it('returns null in environments without `document` (ssr / node)', () => {
     // We can't actually unset happy-dom's `document` mid-suite, so we
-    // instead exercise the guard with a stubbed-out global. The check
-    // is `typeof document === 'undefined'`, evaluated at call time.
+    // exercise the guard with a stubbed-out global. The check is
+    // `typeof document === 'undefined'`, evaluated at call time.
     const realDocument = globalThis.document
     // @ts-expect-error — temporary teardown of the global for this test
     delete globalThis.document
@@ -87,33 +83,28 @@ describe('injectComarkStyles', () => {
   })
 })
 
-describe('ComarkSerializer auto-inject behavior', () => {
+describe('ComarkKit auto-inject behavior', () => {
   it('injects the stylesheet on editor construction by default', () => {
     expect(document.querySelectorAll(`style[${COMARK_STYLE_MARKER}]`)).toHaveLength(0)
-    const editor = new Editor({ element: null, extensions: ComarkKit })
+    const editor = new Editor({ element: null, extensions: [ComarkKit] })
     expect(document.querySelectorAll(`style[${COMARK_STYLE_MARKER}]`)).toHaveLength(1)
     editor.destroy()
   })
 
-  it('skips injection when configured with `injectStyles: false`', () => {
+  it('skips injection when configured with `serializer.injectStyles: false`', () => {
     expect(document.querySelectorAll(`style[${COMARK_STYLE_MARKER}]`)).toHaveLength(0)
     const editor = new Editor({
       element: null,
-      extensions: [
-        // Replace the kit's bundled `ComarkSerializer` with a configured
-        // copy. The remaining kit extensions stay unchanged.
-        ...ComarkKit.filter((e) => e.name !== 'comark'),
-        ComarkSerializer.configure({ injectStyles: false }),
-      ],
+      extensions: [ComarkKit.configure({ serializer: { injectStyles: false } })],
     })
     expect(document.querySelectorAll(`style[${COMARK_STYLE_MARKER}]`)).toHaveLength(0)
     editor.destroy()
   })
 
   it('shares a single style tag across multiple editors (dedup)', () => {
-    const a = new Editor({ element: null, extensions: ComarkKit })
-    const b = new Editor({ element: null, extensions: ComarkKit })
-    const c = new Editor({ element: null, extensions: ComarkKit })
+    const a = new Editor({ element: null, extensions: [ComarkKit] })
+    const b = new Editor({ element: null, extensions: [ComarkKit] })
+    const c = new Editor({ element: null, extensions: [ComarkKit] })
     expect(document.querySelectorAll(`style[${COMARK_STYLE_MARKER}]`)).toHaveLength(1)
     a.destroy()
     b.destroy()
@@ -124,8 +115,7 @@ describe('ComarkSerializer auto-inject behavior', () => {
     const editor = new Editor({
       element: null,
       extensions: [
-        ...ComarkKit.filter((e) => e.name !== 'comark'),
-        ComarkSerializer.configure({ injectStyles: true, injectNonce: 'csp-test' }),
+        ComarkKit.configure({ serializer: { injectStyles: true, injectNonce: 'csp-test' } }),
       ],
     })
     const tag = document.querySelector<HTMLStyleElement>(`style[${COMARK_STYLE_MARKER}]`)

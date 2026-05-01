@@ -15,9 +15,9 @@ export function cleanAttrs(attrs: ComarkElementAttributes | undefined): Record<s
 /**
  * Split Comark element attrs into (semantic, htmlAttrs).
  *
- *   semantic:  keys the extension declares natively on the PM schema
- *   htmlAttrs: the rest — class, id, data-*, aria-*, custom, … — destined
- *              for the extension's `htmlAttrs` PM attr
+ *   semantic:  keys the spec declares natively on the PM schema
+ *   htmlAttrs: the rest — class, id, data-*, aria-*, custom, … —
+ *              destined for the global `htmlAttrs` PM attr
  *
  * Skips `$` and nullish entries.
  */
@@ -64,13 +64,9 @@ export function mergeAttrs(
 
 /**
  * Is the node's `htmlAttrs` bag effectively empty? Two states get
- * collapsed: the bag is missing entirely (a fresh AST built via
- * `fromComark` doesn't add `htmlAttrs` when there's nothing to put in
- * it), and the bag is `{}` (PM's parseHTML default — Tiptap fills the
- * default whenever `parseHTML` returns `null`, so any DOM round-trip
- * leaves `htmlAttrs: {}` even for an attrless element). Code that needs
- * to ask "does this paragraph have any HTML attrs?" must treat both as
- * the same.
+ * collapsed: missing entirely, and `{}` (PM's parseHTML default — Tiptap
+ * fills the default whenever `parseHTML` returns `null`, so any DOM
+ * round-trip leaves `htmlAttrs: {}` even for an attrless element).
  */
 export function hasNoHtmlAttrs(
   node: { attrs?: { htmlAttrs?: unknown } } | null | undefined,
@@ -83,10 +79,9 @@ export function hasNoHtmlAttrs(
 }
 
 /**
- * Are two `htmlAttrs` Records value-equal? PM compares mark attrs
- * structurally, but adjacent marks with `{ class: 'a' }` and
- * `{ class: 'a', id: undefined }` would otherwise be considered distinct
- * and prevent merging. Use this when canonicalizing output.
+ * Are two `htmlAttrs` Records value-equal? Used to canonicalize output
+ * so adjacent marks with `{ class: 'a' }` and `{ class: 'a', id: undefined }`
+ * are considered the same (they would otherwise prevent merging).
  */
 export function attrsEqual(
   a: Record<string, unknown> | undefined,

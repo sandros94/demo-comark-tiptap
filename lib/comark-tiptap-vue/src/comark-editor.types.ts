@@ -1,64 +1,88 @@
-import type { AnyExtension } from '@tiptap/core'
 import type { Editor } from '@tiptap/vue-3'
-import type { ComarkTree, JSONContent } from '@comark/tiptap'
-import type { UnwrapRef } from 'vue'
-import type { UseComarkEditorOptions, UseComarkEditorReturn } from './use-comark-editor'
+import type { ComarkTree, JSONContent, SetComarkContentOptions } from '@comark/tiptap'
+import type { AnyExtension } from '@tiptap/core'
+import type {
+  ContentType,
+  ContentValue,
+  SetContentOptions,
+  SetterInput,
+  UseComarkEditorOptions,
+} from './use-comark-editor'
 import type { ComarkVueComponentExports } from './define-component'
 
-type MaybeUndefined<T extends object, TKept extends keyof T> = {
-  [K in keyof T as K extends TKept ? never : K]: UnwrapRef<T[K]> | undefined
-} & {
-  [K in TKept]: UnwrapRef<T[K]>
+export interface ComarkEditorProps {
+  /**
+   * Pre-built editor instance. If supplied, the wrapper does NOT spin
+   * up its own — useful when the consumer wants full control over the
+   * Tiptap `Editor` lifecycle (e.g. for collaborative setups).
+   */
+  editor?: Editor
+
+  /**
+   * Non-reactive seed. Applied at mount only; later changes are
+   * ignored. Use `v-model` for two-way binding instead.
+   */
+  content?: ContentValue
+
+  /**
+   * Default content flavor. Drives the dispatch when no `v-model`
+   * modifier is set. Modifiers (`v-model.markdown`, `v-model.html`,
+   * `v-model.json`, `v-model.ast`) override this for the bound model.
+   *
+   * @default 'markdown'
+   */
+  contentType?: ContentType
+
+  /** User-defined Comark components from `defineComarkVueComponent`. */
+  components?: ReadonlyArray<ComarkVueComponentExports>
+
+  /** Additional Tiptap extensions, appended after the kit. */
+  extensions?: ReadonlyArray<AnyExtension>
+
+  /** Forwarded to Tiptap's `Editor` constructor. */
+  editorOptions?: UseComarkEditorOptions['editorOptions']
+
+  /** Forwarded to `ComarkKit.configure(...)`. */
+  kitOptions?: UseComarkEditorOptions['kitOptions']
 }
 
-export interface ComarkEditorProps {
-  /** Bring-your-own editor instance (skips internal `useComarkEditor`). */
-  editor?: Editor | undefined
-  /**
-   * Initial document — read once at mount. Not reactive. To replace
-   * content later, use a `v-model:*` binding or the editor's setters
-   * exposed via the slot / template ref.
-   */
-  initial?: ComarkTree | JSONContent | string
-  /** Two-way bind a Comark AST. */
-  ast?: ComarkTree
-  /** Two-way bind a markdown string. */
-  markdown?: string
-  /** Two-way bind a PM JSON document. */
-  json?: JSONContent
-  /** User-defined Comark components (block or inline). */
-  components?: ReadonlyArray<ComarkVueComponentExports>
-  /** Additional Tiptap extensions (appended after the kit). */
-  extensions?: ReadonlyArray<AnyExtension>
-  /** Pass-through for `useComarkEditor` advanced options. */
-  editorOptions?: UseComarkEditorOptions['editorOptions']
+export type ComarkEditorModelModifiers = {
+  markdown?: boolean
+  html?: boolean
+  json?: boolean
+  ast?: boolean
 }
 
 export interface ComarkEditorEmits {
-  /** v-model:ast — fired on every transaction that changes the document. */
-  'update:ast': [tree: ComarkTree]
-  /** v-model:markdown — fired on every transaction. */
-  'update:markdown': [markdown: string]
-  /** v-model:json — fired on every transaction. */
-  'update:json': [json: JSONContent]
-  /** Editor instance, fired once after construction. */
-  'ready': [editor: Editor]
-  /** Catch-all update event with the editor instance. */
-  'update': [editor: Editor]
+  (e: 'update:modelValue', value: ContentValue): void
+  (e: 'ready', editor: Editor): void
+  (e: 'update', editor: Editor): void
+}
+
+export interface ComarkEditorExpose {
+  editor: Editor | undefined
+  isReady: boolean
+  setContent?: (input: SetterInput<ContentValue>, options?: SetContentOptions) => Promise<void>
+  getAst?: () => ComarkTree | null
+  getMarkdown?: () => Promise<string | null>
+  getJson?: () => JSONContent | null
+  getHtml?: () => string | null
 }
 
 export interface ComarkEditorSlots {
-  default(props: { editor: Editor | undefined; isReady: boolean }): unknown
+  /**
+   * Rendered above the Tiptap content. Receives the live editor (when
+   * ready) and an `is-ready` flag so callers can render a toolbar that
+   * reacts to mark / node activity once the editor exists.
+   */
+  default(props: { editor: Editor }): unknown
+  /**
+   * Rendered while the editor is mounting (Tiptap touches the DOM in
+   * its constructor, so SSR / pre-mount renders skip the live
+   * component). Falls back to nothing if the slot isn't supplied.
+   */
   fallback(): unknown
 }
 
-/**
- * Runtime shape of `<ComarkEditor>` accessible via `templateRef.value`.
- * `editor` and `isReady` are always present (they live on the wrapper);
- * the imperative setter / getter functions are only exposed when the
- * component owns its `useComarkEditor` instance (`prop.editor` not set).
- */
-export interface ComarkEditorExpose extends MaybeUndefined<
-  UseComarkEditorReturn,
-  'editor' | 'isReady'
-> {}
+// Re-export the `SetComarkContentOptions` type for downstream users.
+export type { SetComarkContentOptions }

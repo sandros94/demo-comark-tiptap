@@ -2,21 +2,27 @@
  * @vitest-environment happy-dom
  */
 
-import { generateHTML, generateJSON, type JSONContent as TipJSONContent } from '@tiptap/core'
+import {
+  generateHTML,
+  generateJSON,
+  type AnyExtension,
+  type JSONContent as TipJSONContent,
+} from '@tiptap/core'
 import { describe, expect, it } from 'vitest'
 import { defineComarkComponent } from './extensions/component'
-import { ComarkKit, comarkSpecs } from './kit'
+import { ComarkKit } from './kit'
 import { comarkToPmDoc, createSerializer, pmDocToComark } from './serializer'
-import type { ComarkNode, ComarkTree } from './types'
+import { comarkSpecs } from './specs'
+import type { ComarkHelpers, ComarkNode, ComarkTree } from './types'
 
 // #region internal helpers
 
 const baseHelpers = createSerializer(comarkSpecs)
 
 /**
- * Strip Comark's `$` source-position bag and any other parser bookkeeping
- * that tests don't care about. Both directions of the round-trip should
- * produce trees comparable up to this scrub.
+ * Strip Comark's `$` source-position bag and any other parser
+ * bookkeeping that tests don't care about. Both directions of the
+ * round-trip should produce trees comparable up to this scrub.
  */
 function cleanTree(tree: ComarkTree): ComarkTree {
   return {
@@ -37,11 +43,17 @@ function cleanNode(node: ComarkNode): ComarkNode {
   return [tag, cleanAttrs, ...children.map((c) => cleanNode(c as ComarkNode))] as ComarkNode
 }
 
+const defaultExtensions: AnyExtension[] = [ComarkKit]
+
 /**
  * The full DOM round-trip: tree → PM JSON → HTML → PM JSON → tree.
  * Both ends are scrubbed before comparison.
  */
-function domRoundTrip(tree: ComarkTree, extensions = ComarkKit, helpers = baseHelpers): ComarkTree {
+function domRoundTrip(
+  tree: ComarkTree,
+  extensions: AnyExtension[] = defaultExtensions,
+  helpers: ComarkHelpers = baseHelpers,
+): ComarkTree {
   const pmIn = comarkToPmDoc(tree, helpers)
   const html = generateHTML(pmIn, extensions)
   const pmOut = generateJSON(html, extensions) as TipJSONContent
@@ -133,10 +145,11 @@ describe('DOM round-trip — code block', () => {
     expect(cleanTree(domRoundTrip(tree))).toEqual(cleanTree(tree))
   })
 
-  // Inner-code attrs other than `language-{lang}` ride on `codeHtmlAttrs`
-  // and have to be emitted by the codeBlock's own renderHTML — the per-
-  // attribute renderHTML can't reach the inner element. This test pins
-  // that down so a future refactor can't silently drop the feature.
+  // Inner-code attrs other than `language-{lang}` ride on
+  // `codeHtmlAttrs` and have to be emitted by the codeBlock's own
+  // renderHTML — the per-attribute renderHTML can't reach the inner
+  // element. This test pins that down so a future refactor can't
+  // silently drop the feature.
   it('preserves extra inner-<code> attributes (e.g. data-line-numbers)', () => {
     const tree: ComarkTree = {
       nodes: [
@@ -190,9 +203,6 @@ describe('DOM round-trip — hardBreak', () => {
     expect(cleanTree(domRoundTrip(tree))).toEqual(cleanTree(tree))
   })
 
-  // Regression: htmlAttrs on hard-break is rare but supported. Verifying
-  // it survives the DOM ensures we don't quietly drop attributes a
-  // downstream tool (e.g. screen-reader hint) might depend on.
   it('preserves htmlAttrs on a <br>', () => {
     const tree: ComarkTree = {
       nodes: [['p', {}, 'a', ['br', { 'aria-hidden': 'true', 'class': 'soft' }], 'b']],
@@ -203,7 +213,7 @@ describe('DOM round-trip — hardBreak', () => {
   })
 })
 
-describe('DOM round-trip — comment node (data-comark-comment payload-loss)', () => {
+describe('DOM round-trip — comment node', () => {
   it('preserves a non-empty comment text', () => {
     const tree: ComarkTree = {
       nodes: [[null, {}, 'TODO: write more here'] as never, ['p', {}, 'After']],
@@ -277,9 +287,7 @@ describe('DOM round-trip — lists', () => {
 describe('DOM round-trip — tables', () => {
   // Canonical GFM-style table — the only shape Comark's parser produces
   // from markdown. colspan/rowspan/colwidth aren't emitted by the parser
-  // and are covered by the spec-level [table.test.ts] tests instead;
-  // exercising them through DOM would force the input into a non-
-  // canonical form and the assertion would have to coerce numbers.
+  // and are covered by the spec-level [table.test.ts] tests instead.
   it('round-trips a header + body table with thead/tbody regrouping', () => {
     const tree: ComarkTree = {
       nodes: [
@@ -371,8 +379,7 @@ describe('DOM round-trip — adjacent same-mark spans', () => {
   // Two adjacent `<strong>X</strong><strong>Y</strong>` in source HTML
   // should collapse to a single PM mark on a single text node, then
   // re-emit as one `<strong>` span. We round-trip via the orchestrator,
-  // so what matters is that the final tree is *equivalent* — not that
-  // it preserves the original split.
+  // so what matters is that the final tree is *equivalent*.
   it('collapses two attrless <strong> runs into one on the way back', () => {
     const start: ComarkTree = {
       nodes: [['p', {}, ['strong', {}, 'X'], ['strong', {}, 'Y']]],
@@ -416,7 +423,7 @@ describe('DOM round-trip — custom components', () => {
     props: { color: { type: 'string', default: 'gray' } },
   })
 
-  const extensions = [...ComarkKit, Alert.extension, Badge.extension]
+  const extensions: AnyExtension[] = [ComarkKit.configure({ components: [Alert, Badge] })]
   const helpers = createSerializer({
     nodes: [...comarkSpecs.nodes, Alert.spec, Badge.spec],
     marks: comarkSpecs.marks,

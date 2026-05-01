@@ -1,13 +1,3 @@
-// Augment Tiptap's NodeConfig with the `tableRole` field used by
-// `prosemirror-tables` for cell/row/header behavior. The official
-// `@tiptap/extension-table` ships this same augmentation; we duplicate it
-// here so our table extensions work without depending on that package.
-declare module '@tiptap/core' {
-  interface NodeConfig {
-    tableRole?: 'table' | 'row' | 'header_cell' | 'cell' | 'caption'
-  }
-}
-
 import type { JSONContent } from '@tiptap/core'
 import type {
   ComarkComment,
@@ -29,8 +19,9 @@ export type {
 }
 
 /**
- * A PM mark in JSON form. The `marks` array on `JSONContent` doesn't have a
- * named type so we name one for clarity.
+ * A PM mark in JSON form. Tiptap's `JSONContent` types `marks` as
+ * `Record<string, any>[]` — we name a stricter shape here because the
+ * serializer reads `type` and `attrs` everywhere.
  */
 export interface PMMark {
   type: string
@@ -38,23 +29,28 @@ export interface PMMark {
 }
 
 /**
- * Per-node serialization spec. Every node extension exports one of these and
- * stashes it in its Tiptap storage. The orchestrator (`createSerializer`)
- * builds dispatch tables from a list of these.
+ * Per-node serialization spec. Stock specs (paragraph, heading, …) live in
+ * `./specs/*` and ship with `comarkSpecs`; user-defined components emit
+ * one of these from `defineComarkComponent`.
+ *
+ * The orchestrator (`createSerializer`) builds dispatch tables from a list
+ * of these — there is no `addStorage` sidecar on the Tiptap extensions.
  */
 export interface NodeSpec {
-  /** PM type name (matches the Tiptap node's `name` field). */
+  /** PM type name (matches the Tiptap node's `name`). */
   pmName: string
   /**
-   * Comark tag(s) this node claims on the way in. Heading claims `h1..h6`;
-   * paragraph claims `p`; etc. Tag is matched on `el[0]`.
+   * Comark tag(s) this node claims. Heading claims `h1..h6`; paragraph
+   * claims `p`; tables claim `table`/`tr`/`th`/`td`. Tag is matched on
+   * `el[0]`. An empty list means the spec is dispatched by PM name only
+   * (e.g. `comarkComment` is routed when `el[0] === null`).
    */
   tags: readonly string[]
   /**
-   * Whether this node is a block-level structural element (default) or an
-   * inline atom that can appear inside a paragraph (`hardBreak`, `image`,
-   * registered inline components). The orchestrator uses this to bucket
-   * Comark's autoUnwrap-flattened inline runs back into paragraphs.
+   * Block-level structural element (default) or inline atom that can
+   * appear inside a paragraph (`hardBreak`, `image`, registered inline
+   * components). The orchestrator uses this to bucket Comark's
+   * autoUnwrap-flattened inline runs back into paragraphs.
    *
    * @default 'block'
    */
@@ -64,17 +60,17 @@ export interface NodeSpec {
   /** Comark element → PM JSON node. */
   fromComark: (el: ComarkElement, h: ComarkHelpers) => JSONContent | null
   /**
-   * Optional disambiguation when several specs share a tag. The first spec
-   * whose `matches` returns true wins. Without `matches`, the first spec for
-   * a given tag wins by registration order.
+   * Optional disambiguation when several specs share a tag. The first
+   * spec whose `matches` returns true wins; without `matches`, the
+   * registration order decides.
    */
   matches?: (el: ComarkElement) => boolean
 }
 
 /**
- * Per-mark serialization spec. Marks differ from nodes in that they wrap
- * inline content rather than carrying it — the orchestrator hands the
- * already-serialized child node to `toComark` and asks the mark to wrap it.
+ * Per-mark serialization spec. Marks differ from nodes: the orchestrator
+ * hands the already-serialized child node to `toComark` and asks the mark
+ * to wrap it.
  */
 export interface MarkSpec {
   pmName: string
@@ -87,7 +83,7 @@ export interface MarkSpec {
 
 /**
  * Recursion helpers passed into every `toComark` / `fromComark` so each
- * extension can defer back to the orchestrator for nested children.
+ * spec can defer back to the orchestrator for nested children.
  */
 export interface ComarkHelpers {
   /** PM block-content children → Comark nodes. */
@@ -98,8 +94,8 @@ export interface ComarkHelpers {
   parseBlocks: (children: ComarkNode[]) => JSONContent[]
   /** Comark children (inline context) → PM JSON nodes. */
   parseInlines: (children: ComarkNode[]) => JSONContent[]
-  /** All node specs registered with the orchestrator. */
+  /** All node specs the orchestrator was built with. */
   nodeSpecs: readonly NodeSpec[]
-  /** All mark specs registered with the orchestrator. */
+  /** All mark specs the orchestrator was built with. */
   markSpecs: readonly MarkSpec[]
 }
